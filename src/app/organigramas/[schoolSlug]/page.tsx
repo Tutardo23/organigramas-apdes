@@ -1,9 +1,10 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowLeft, Edit3, GitBranch } from "lucide-react";
+import { ArrowLeft, Edit3, GitBranch, Home, Trash2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { OrgChartCanvas } from "../../../components/organigramas/OrgChartCanvas";
 import { prisma } from "../../../lib/prisma";
+import { deleteOrgChartFormAction } from "./editar/actions";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
@@ -89,10 +90,16 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-8">
       <section className="mx-auto max-w-[1800px]">
-        <Link href="/organigramas" className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
-          <ArrowLeft className="h-4 w-4" />
-          Volver a organigramas
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/organigramas" className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
+            <ArrowLeft className="h-4 w-4" />
+            Volver a organigramas
+          </Link>
+          <Link href="/" className="inline-flex items-center gap-2 text-sm font-black text-slate-600 hover:text-slate-900">
+            <Home className="h-4 w-4" />
+            Menú principal
+          </Link>
+        </div>
 
         <div className="mt-6">
           <div className="mb-6 flex flex-col justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:flex-row md:items-end">
@@ -115,6 +122,25 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
                 <Link href={`/organigramas/${school.slug}/editar`} className="inline-flex items-center gap-2 rounded-full bg-blue-700 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-blue-800">
                   <Edit3 className="h-4 w-4" /> Editar
                 </Link>
+
+                <details className="group relative">
+                  <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-black text-rose-700 transition hover:bg-rose-100">
+                    <Trash2 className="h-4 w-4" /> Eliminar
+                  </summary>
+                  <div className="absolute right-0 z-30 mt-2 w-[320px] rounded-3xl border border-rose-100 bg-white p-4 text-left shadow-2xl">
+                    <p className="text-sm font-black text-slate-950">Eliminar este organigrama</p>
+                    <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-500">
+                      Se elimina el organigrama actual con sus cajas, relaciones y observaciones. No elimina el colegio ni las personas guardadas.
+                    </p>
+                    <form action={deleteOrgChartFormAction} className="mt-4">
+                      <input type="hidden" name="orgChartId" value={currentChart.id} />
+                      <input type="hidden" name="schoolSlug" value={school.slug} />
+                      <button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-black text-white transition hover:bg-rose-700">
+                        <Trash2 className="h-4 w-4" /> Confirmar eliminación
+                      </button>
+                    </form>
+                  </div>
+                </details>
               </div>
             ) : null}
           </div>

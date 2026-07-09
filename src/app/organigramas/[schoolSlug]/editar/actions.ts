@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { prisma } from "../../../../lib/prisma";
 
 function textOrNull(value: unknown) {
@@ -113,6 +114,36 @@ async function getNextNodeOrder(orgChartId: string) {
 async function getNextMemberOrder(orgNodeId: string) {
   const count = await (prisma as any).orgNodeMember.count({ where: { orgNodeId } });
   return count + 1;
+}
+
+
+export async function deleteOrgChartAction(input: {
+  orgChartId: string;
+  schoolSlug: string;
+}) {
+  if (!input.orgChartId) {
+    throw new Error("No se encontró el organigrama para eliminar.");
+  }
+
+  await (prisma as any).orgChart.delete({
+    where: { id: input.orgChartId },
+  });
+
+  revalidatePath("/");
+  revalidatePath("/organigramas");
+  revalidatePath(`/organigramas/${input.schoolSlug}`);
+  revalidatePath(`/organigramas/${input.schoolSlug}/editar`);
+  revalidatePath("/talento");
+  revalidatePath(`/talento/${input.schoolSlug}`);
+
+  redirect("/organigramas");
+}
+
+export async function deleteOrgChartFormAction(formData: FormData) {
+  const orgChartId = String(formData.get("orgChartId") ?? "");
+  const schoolSlug = String(formData.get("schoolSlug") ?? "");
+
+  await deleteOrgChartAction({ orgChartId, schoolSlug });
 }
 
 export async function createNodeAction(input: {

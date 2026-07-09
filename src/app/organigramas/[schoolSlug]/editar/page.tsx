@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowLeft, Eye } from "lucide-react";
+import { ArrowLeft, Eye, Home, ListTree, Trash2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { OrgChartEditor } from "../../../../components/organigramas/OrgChartEditor";
 import { prisma } from "../../../../lib/prisma";
+import { deleteOrgChartFormAction } from "./actions";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
@@ -105,10 +106,55 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
             </p>
           </div>
 
-          <Link href={`/organigramas/${school.slug}`} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50">
-            <Eye className="h-4 w-4" />
-            Ver organigrama
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              <Home className="h-4 w-4" />
+              Menú principal
+            </Link>
+
+            <Link
+              href="/organigramas"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              <ListTree className="h-4 w-4" />
+              Organigramas
+            </Link>
+
+            <Link
+              href={`/organigramas/${school.slug}`}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+            >
+              <Eye className="h-4 w-4" />
+              Ver organigrama
+            </Link>
+
+            <details className="group relative">
+              <summary className="inline-flex cursor-pointer list-none items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 shadow-sm transition hover:bg-rose-100">
+                <Trash2 className="h-4 w-4" />
+                Eliminar
+              </summary>
+              <div className="absolute right-0 z-30 mt-2 w-[320px] rounded-3xl border border-rose-100 bg-white p-4 shadow-2xl">
+                <p className="text-sm font-black text-slate-950">Eliminar este organigrama</p>
+                <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-500">
+                  Se elimina el organigrama actual con sus cajas, relaciones y observaciones. No elimina el colegio ni las personas guardadas.
+                </p>
+                <form action={deleteOrgChartFormAction} className="mt-4">
+                  <input type="hidden" name="orgChartId" value={currentChart.id} />
+                  <input type="hidden" name="schoolSlug" value={school.slug} />
+                  <button
+                    type="submit"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-black text-white transition hover:bg-rose-700"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Confirmar eliminación
+                  </button>
+                </form>
+              </div>
+            </details>
+          </div>
         </div>
 
         <OrgChartEditor
