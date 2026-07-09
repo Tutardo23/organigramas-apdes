@@ -1,0 +1,245 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  APDES_CENTRAL
+  DIRECTOR_COLEGIO
+  EDITOR_COLEGIO
+  LECTOR
+}
+
+enum OrgChartStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EdgeType {
+  JERARQUICA
+  TRANSVERSAL
+  COLABORACION
+  ACOMPANAMIENTO
+  DECISION
+  INFORMACION
+}
+
+enum NodeArea {
+  DIRECCION
+  ACADEMICA
+  FORMACION
+  FAMILIA
+  COMUNICACION
+  POSTULACIONES
+  OPERACIONES
+  ADMINISTRACION
+  TUTORIA
+  CAPELLANIA
+  OTRO
+}
+
+enum OrgNodeMemberRole {
+  RESPONSABLE
+  EQUIPO
+  APOYO
+  EXTERNO
+}
+
+enum OrgReviewNoteStatus {
+  OPEN
+  RESOLVED
+}
+
+model School {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  city      String?
+  province  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  people      Person[]
+  orgCharts   OrgChart[]
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  auditLogs   AuditLog[]
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  userId    String
+  schoolId  String?
+  role      UserRole
+  createdAt DateTime @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  school School? @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, schoolId, role])
+}
+
+model Person {
+  id           String   @id @default(cuid())
+  schoolId     String
+  firstName    String
+  lastName     String
+  email        String?
+  phone        String?
+  formalRole   String?
+  realFunction String?
+  weeklyHours  Int?
+  active       Boolean  @default(true)
+
+  // Preparado para el futuro módulo de talento.
+  photoUrl        String?
+  talentNotes     String?
+  potentialLevel  String?
+  competencies    Json?
+  trainings       Json?
+  evaluations     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  school          School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  nodes           OrgNode[]
+  nodeMemberships OrgNodeMember[]
+}
+
+model OrgChart {
+  id          String         @id @default(cuid())
+  schoolId    String
+  title       String
+  year        Int
+  status      OrgChartStatus @default(DRAFT)
+  version     Int            @default(1)
+  summary     String?
+
+  reviewRequestedAt DateTime?
+  reviewedAt         DateTime?
+  publishedAt        DateTime?
+  archivedAt         DateTime?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  school      School          @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  nodes       OrgNode[]
+  edges       OrgEdge[]
+  reviewNotes OrgReviewNote[]
+}
+
+model OrgNode {
+  id         String @id @default(cuid())
+  orgChartId String
+  personId   String?
+
+  title        String
+  area         NodeArea @default(OTRO)
+  formalRole   String?
+  realFunction String?
+  description  String?
+  weeklyHours  Int?
+
+  positionX Float  @default(0)
+  positionY Float  @default(0)
+  color     String?
+  icon      String?
+  order     Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orgChart OrgChart @relation(fields: [orgChartId], references: [id], onDelete: Cascade)
+  person   Person?  @relation(fields: [personId], references: [id], onDelete: SetNull)
+
+  members     OrgNodeMember[]
+  reviewNotes OrgReviewNote[]
+  sourceEdges OrgEdge[]       @relation("SourceNode")
+  targetEdges OrgEdge[]       @relation("TargetNode")
+}
+
+model OrgNodeMember {
+  id        String            @id @default(cuid())
+  orgNodeId String
+  personId  String
+  role      OrgNodeMemberRole @default(EQUIPO)
+  roleTitle String?
+  weeklyHours Int?
+  notes     String?
+  order     Int               @default(0)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  node   OrgNode @relation(fields: [orgNodeId], references: [id], onDelete: Cascade)
+  person Person  @relation(fields: [personId], references: [id], onDelete: Cascade)
+
+  @@index([orgNodeId])
+  @@index([personId])
+}
+
+model OrgEdge {
+  id         String   @id @default(cuid())
+  orgChartId String
+  sourceId   String
+  targetId   String
+  type       EdgeType @default(JERARQUICA)
+  label      String?
+
+  orgChart OrgChart @relation(fields: [orgChartId], references: [id], onDelete: Cascade)
+  source   OrgNode  @relation("SourceNode", fields: [sourceId], references: [id], onDelete: Cascade)
+  target   OrgNode  @relation("TargetNode", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([orgChartId])
+  @@index([sourceId])
+  @@index([targetId])
+}
+
+model OrgReviewNote {
+  id         String              @id @default(cuid())
+  orgChartId String
+  nodeId     String?
+  title      String
+  body       String?
+  status     OrgReviewNoteStatus @default(OPEN)
+  createdBy  String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  orgChart OrgChart @relation(fields: [orgChartId], references: [id], onDelete: Cascade)
+  node     OrgNode? @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@index([orgChartId])
+  @@index([nodeId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  action      String
+  entity      String
+  entityId    String?
+  schoolId    String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+}
