@@ -48,19 +48,27 @@ type MemberRoleValue = (typeof MEMBER_ROLES)[number];
 type ChartStatusValue = (typeof CHART_STATUSES)[number];
 
 function safeArea(value: string): NodeAreaValue {
-  return NODE_AREAS.includes(value as NodeAreaValue) ? (value as NodeAreaValue) : "OTRO";
+  return NODE_AREAS.includes(value as NodeAreaValue)
+    ? (value as NodeAreaValue)
+    : "OTRO";
 }
 
 function safeEdgeType(value: string): EdgeTypeValue {
-  return EDGE_TYPES.includes(value as EdgeTypeValue) ? (value as EdgeTypeValue) : "JERARQUICA";
+  return EDGE_TYPES.includes(value as EdgeTypeValue)
+    ? (value as EdgeTypeValue)
+    : "JERARQUICA";
 }
 
 function safeMemberRole(value: string): MemberRoleValue {
-  return MEMBER_ROLES.includes(value as MemberRoleValue) ? (value as MemberRoleValue) : "EQUIPO";
+  return MEMBER_ROLES.includes(value as MemberRoleValue)
+    ? (value as MemberRoleValue)
+    : "EQUIPO";
 }
 
 function safeChartStatus(value: string): ChartStatusValue {
-  return CHART_STATUSES.includes(value as ChartStatusValue) ? (value as ChartStatusValue) : "DRAFT";
+  return CHART_STATUSES.includes(value as ChartStatusValue)
+    ? (value as ChartStatusValue)
+    : "DRAFT";
 }
 
 const defaultColorsByArea: Record<string, string> = {
@@ -105,17 +113,17 @@ function normalizeNode(node: any) {
   };
 }
 
-
 async function getNextNodeOrder(orgChartId: string) {
   const count = await (prisma as any).orgNode.count({ where: { orgChartId } });
   return count + 1;
 }
 
 async function getNextMemberOrder(orgNodeId: string) {
-  const count = await (prisma as any).orgNodeMember.count({ where: { orgNodeId } });
+  const count = await (prisma as any).orgNodeMember.count({
+    where: { orgNodeId },
+  });
   return count + 1;
 }
-
 
 export async function deleteOrgChartAction(input: {
   orgChartId: string;
@@ -187,6 +195,40 @@ export async function createNodeAction(input: {
   return normalizeNode(node);
 }
 
+export async function updateNodesVisualDefaultsAction(input: {
+  orgChartId: string;
+  schoolSlug: string;
+}) {
+  const nodes = await (prisma as any).orgNode.findMany({
+    where: { orgChartId: input.orgChartId },
+    select: { id: true, area: true },
+  });
+
+  await Promise.all(
+    nodes.map((node: any) => {
+      const area = safeArea(String(node.area ?? "OTRO"));
+      return (prisma as any).orgNode.update({
+        where: { id: node.id },
+        data: {
+          color: defaultColorsByArea[area] || defaultColorsByArea.OTRO,
+          icon: defaultIconsByArea[area] || defaultIconsByArea.OTRO,
+        },
+      });
+    }),
+  );
+
+  revalidateOrganigrama(input.schoolSlug);
+
+  return nodes.map((node: any) => {
+    const area = safeArea(String(node.area ?? "OTRO"));
+    return {
+      id: node.id,
+      color: defaultColorsByArea[area] || defaultColorsByArea.OTRO,
+      icon: defaultIconsByArea[area] || defaultIconsByArea.OTRO,
+    };
+  });
+}
+
 export async function updateNodeAction(input: {
   nodeId: string;
   schoolSlug: string;
@@ -256,7 +298,8 @@ export async function updateNodeAction(input: {
     finalPersonId = touchedPerson.id;
   }
 
-  const finalIcon = textOrNull(input.icon) || defaultIconsByArea[area] || "network";
+  const finalIcon =
+    textOrNull(input.icon) || defaultIconsByArea[area] || "network";
 
   const updatedNode = await (prisma as any).orgNode.update({
     where: { id: input.nodeId },
@@ -330,7 +373,10 @@ export async function updateNodesPositionsAction(input: {
   return { ok: true };
 }
 
-export async function deleteNodeAction(input: { nodeId: string; schoolSlug: string }) {
+export async function deleteNodeAction(input: {
+  nodeId: string;
+  schoolSlug: string;
+}) {
   await (prisma as any).orgNode.delete({ where: { id: input.nodeId } });
   revalidateOrganigrama(input.schoolSlug);
   return { ok: true, nodeId: input.nodeId };
@@ -376,7 +422,10 @@ export async function updateEdgeAction(input: {
   return edge;
 }
 
-export async function deleteEdgeAction(input: { edgeId: string; schoolSlug: string }) {
+export async function deleteEdgeAction(input: {
+  edgeId: string;
+  schoolSlug: string;
+}) {
   await (prisma as any).orgEdge.delete({ where: { id: input.edgeId } });
   revalidateOrganigrama(input.schoolSlug);
   return { ok: true, edgeId: input.edgeId };
@@ -412,7 +461,9 @@ export async function createOrUpdateNodeMemberAction(input: {
 
   let personId = input.personId || null;
   if (personId === "__new__") personId = null;
-  const nextMemberOrder = input.memberId ? undefined : await getNextMemberOrder(input.orgNodeId);
+  const nextMemberOrder = input.memberId
+    ? undefined
+    : await getNextMemberOrder(input.orgNodeId);
 
   if (personId) {
     await (prisma as any).person.update({
@@ -497,7 +548,11 @@ export async function deleteNodeMemberAction(input: {
   });
 
   revalidateOrganigrama(input.schoolSlug);
-  return { ok: true, memberId: input.memberId, node: normalizeNode(updatedNode) };
+  return {
+    ok: true,
+    memberId: input.memberId,
+    node: normalizeNode(updatedNode),
+  };
 }
 
 export async function updateOrgChartStatusAction(input: {

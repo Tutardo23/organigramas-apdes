@@ -1,17 +1,28 @@
 import {
   BookOpen,
+  BookMarked,
+  Briefcase,
   Building2,
+  CalendarCheck,
+  Church,
+  ClipboardCheck,
+  ClipboardList,
+  FileText,
   GraduationCap,
   Handshake,
   HeartHandshake,
   Landmark,
   Layers3,
+  MessageCircle,
   Megaphone,
   Network,
   PenTool,
+  School,
   ShieldCheck,
+  Target,
   UserRound,
   UsersRound,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -119,19 +130,128 @@ export const colorPresets = [
   "#111827",
 ];
 
+export const areaIconDefaults: Record<string, string> = {
+  DIRECCION: "landmark",
+  ACADEMICA: "graduation-cap",
+  FORMACION: "book-open",
+  FAMILIA: "users",
+  COMUNICACION: "megaphone",
+  POSTULACIONES: "pen-tool",
+  OPERACIONES: "building",
+  ADMINISTRACION: "shield-check",
+  TUTORIA: "handshake",
+  CAPELLANIA: "heart-handshake",
+  OTRO: "network",
+};
+
 export const iconOptions = [
-  { value: "network", label: "Red", Icon: Network },
-  { value: "landmark", label: "Dirección", Icon: Landmark },
-  { value: "graduation-cap", label: "Académica", Icon: GraduationCap },
-  { value: "book-open", label: "Formación", Icon: BookOpen },
-  { value: "users", label: "Personas", Icon: UsersRound },
-  { value: "megaphone", label: "Comunicación", Icon: Megaphone },
-  { value: "pen-tool", label: "Postulaciones", Icon: PenTool },
-  { value: "building", label: "Operaciones", Icon: Building2 },
-  { value: "shield-check", label: "Administración", Icon: ShieldCheck },
-  { value: "handshake", label: "Tutoría", Icon: Handshake },
-  { value: "heart-handshake", label: "Acompañamiento", Icon: HeartHandshake },
-  { value: "layers", label: "Área", Icon: Layers3 },
+  {
+    value: "landmark",
+    label: "Dirección",
+    group: "Institucional",
+    Icon: Landmark,
+  },
+  { value: "school", label: "Colegio", group: "Institucional", Icon: School },
+  { value: "network", label: "Red", group: "Institucional", Icon: Network },
+  { value: "layers", label: "Área", group: "Institucional", Icon: Layers3 },
+  {
+    value: "briefcase",
+    label: "Gestión",
+    group: "Institucional",
+    Icon: Briefcase,
+  },
+
+  {
+    value: "graduation-cap",
+    label: "Académica",
+    group: "Educación",
+    Icon: GraduationCap,
+  },
+  {
+    value: "book-open",
+    label: "Formación",
+    group: "Educación",
+    Icon: BookOpen,
+  },
+  {
+    value: "book-marked",
+    label: "Proyecto",
+    group: "Educación",
+    Icon: BookMarked,
+  },
+  { value: "target", label: "Objetivos", group: "Educación", Icon: Target },
+  {
+    value: "clipboard-check",
+    label: "Evaluación",
+    group: "Educación",
+    Icon: ClipboardCheck,
+  },
+
+  {
+    value: "users",
+    label: "Familias/personas",
+    group: "Personas",
+    Icon: UsersRound,
+  },
+  { value: "user", label: "Responsable", group: "Personas", Icon: UserRound },
+  { value: "handshake", label: "Tutoría", group: "Personas", Icon: Handshake },
+  {
+    value: "heart-handshake",
+    label: "Acompañamiento",
+    group: "Personas",
+    Icon: HeartHandshake,
+  },
+  { value: "church", label: "Capellanía", group: "Personas", Icon: Church },
+
+  {
+    value: "megaphone",
+    label: "Comunicación",
+    group: "Procesos",
+    Icon: Megaphone,
+  },
+  {
+    value: "message-circle",
+    label: "Conversación",
+    group: "Procesos",
+    Icon: MessageCircle,
+  },
+  {
+    value: "pen-tool",
+    label: "Postulaciones",
+    group: "Procesos",
+    Icon: PenTool,
+  },
+  {
+    value: "calendar-check",
+    label: "Eventos",
+    group: "Procesos",
+    Icon: CalendarCheck,
+  },
+  {
+    value: "file-text",
+    label: "Documentos",
+    group: "Procesos",
+    Icon: FileText,
+  },
+  {
+    value: "clipboard-list",
+    label: "Procesos",
+    group: "Procesos",
+    Icon: ClipboardList,
+  },
+  {
+    value: "building",
+    label: "Operaciones",
+    group: "Operación",
+    Icon: Building2,
+  },
+  { value: "wrench", label: "Mantenimiento", group: "Operación", Icon: Wrench },
+  {
+    value: "shield-check",
+    label: "Administración",
+    group: "Operación",
+    Icon: ShieldCheck,
+  },
 ];
 
 const iconMap = iconOptions.reduce<Record<string, LucideIcon>>((acc, item) => {
@@ -139,12 +259,28 @@ const iconMap = iconOptions.reduce<Record<string, LucideIcon>>((acc, item) => {
   return acc;
 }, {});
 
-export function getNodeColor(color: string | null | undefined, area: string) {
-  return color || areaColors[area] || areaColors.OTRO;
+export function getDefaultColorForArea(area: string) {
+  return areaColors[area] || areaColors.OTRO;
 }
 
-export function getIcon(icon: string | null | undefined) {
-  return iconMap[icon || "network"] || Network;
+export function getDefaultIconForArea(area: string) {
+  return areaIconDefaults[area] || areaIconDefaults.OTRO;
+}
+
+export function getNodeColor(color: string | null | undefined, area: string) {
+  return color || getDefaultColorForArea(area);
+}
+
+export function getNodeIconValue(
+  icon: string | null | undefined,
+  area: string,
+) {
+  if (icon && icon !== "network") return icon;
+  return getDefaultIconForArea(area);
+}
+
+export function getIcon(icon: string | null | undefined, area = "OTRO") {
+  return iconMap[getNodeIconValue(icon, area)] || Network;
 }
 
 function formatPersonName(person?: PersonPreview | null) {
@@ -154,12 +290,16 @@ function formatPersonName(person?: PersonPreview | null) {
 }
 
 function getResponsible(data: OrgNodeData) {
-  const fromMembers = data.members?.find((member) => member.role === "RESPONSABLE")?.person;
+  const fromMembers = data.members?.find(
+    (member) => member.role === "RESPONSABLE",
+  )?.person;
   return fromMembers ?? data.person ?? data.members?.[0]?.person ?? null;
 }
 
 function getTotalHours(data: OrgNodeData) {
-  const memberHours = data.members?.reduce((acc, member) => acc + (member.weeklyHours ?? 0), 0) ?? 0;
+  const memberHours =
+    data.members?.reduce((acc, member) => acc + (member.weeklyHours ?? 0), 0) ??
+    0;
   return memberHours || data.weeklyHours || null;
 }
 
@@ -175,7 +315,7 @@ export function OrgNodeCard({
   compact?: boolean;
 }) {
   const color = getNodeColor(data.color, data.area);
-  const Icon = getIcon(data.icon);
+  const Icon = getIcon(data.icon, data.area);
   const responsible = getResponsible(data);
   const responsibleName = formatPersonName(responsible);
   const memberCount = data.members?.length ?? (data.person ? 1 : 0);
@@ -186,7 +326,9 @@ export function OrgNodeCard({
       className={`group relative w-[235px] rounded-[1.5rem] p-[1px] transition ${
         selected ? "scale-[1.015] shadow-2xl" : "shadow-md hover:shadow-xl"
       }`}
-      style={{ background: `linear-gradient(135deg, ${color}, rgba(226,232,240,0.92))` }}
+      style={{
+        background: `linear-gradient(135deg, ${color}, rgba(226,232,240,0.92))`,
+      }}
     >
       <div className="rounded-[1.45rem] border border-white/80 bg-white p-3">
         <div className="flex items-start gap-3">

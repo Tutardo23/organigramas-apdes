@@ -1,7 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { OrgChartStatus } from "@prisma/client";
 import { prisma } from "../../lib/prisma";
 
 function slugify(value: string) {
@@ -50,15 +50,35 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
   });
 
   if (!existingChart) {
-    await prisma.orgChart.create({
+    await (prisma as any).orgChart.create({
       data: {
         schoolId: school.id,
         title: `Organigrama Institucional ${school.name} ${year}`,
         year,
-        status: OrgChartStatus.DRAFT,
+        status: "DRAFT",
       },
     });
   }
 
+  revalidatePath("/");
+  revalidatePath("/organigramas");
   redirect(`/organigramas/${school.slug}/editar`);
+}
+
+export async function deleteSchoolAction(formData: FormData) {
+  const schoolId = String(formData.get("schoolId") ?? "").trim();
+
+  if (!schoolId) {
+    throw new Error("No se pudo identificar el colegio para eliminar.");
+  }
+
+  await (prisma as any).school.delete({
+    where: {
+      id: schoolId,
+    },
+  });
+
+  revalidatePath("/");
+  revalidatePath("/organigramas");
+  redirect("/organigramas");
 }

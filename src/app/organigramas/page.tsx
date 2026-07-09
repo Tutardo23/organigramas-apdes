@@ -1,7 +1,18 @@
 import Link from "next/link";
-import { Building2, CalendarDays, MapPin, Plus, Settings2 } from "lucide-react";
-import { createSchoolAndOrgChartAction } from "./actions";
+import {
+  AlertTriangle,
+  Building2,
+  CalendarDays,
+  Home,
+  MapPin,
+  Plus,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import { createSchoolAndOrgChartAction, deleteSchoolAction } from "./actions";
 import { prisma } from "../../lib/prisma";
+
+export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Organigramas | APDES",
@@ -23,8 +34,22 @@ export default async function OrganigramasPage() {
   });
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-8">
+    <main className="min-h-screen bg-slate-50 px-5 py-6">
       <section className="mx-auto max-w-7xl">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <Link
+            href="/"
+            className="inline-flex w-fit items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            <Home className="h-4 w-4" />
+            Menú principal
+          </Link>
+
+          <p className="text-sm font-semibold text-slate-500">
+            Desde acá podés crear, editar, ver o eliminar colegios cargados por error.
+          </p>
+        </div>
+
         <div className="mb-8 grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-7 shadow-sm">
             <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-700">
@@ -159,6 +184,40 @@ export default async function OrganigramasPage() {
                     Editar
                   </Link>
                 </div>
+
+                <details className="mt-3 rounded-2xl border border-red-100 bg-red-50/60 p-3">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-red-700 [&::-webkit-details-marker]:hidden">
+                    <span className="inline-flex items-center gap-2">
+                      <Trash2 className="h-4 w-4" />
+                      Eliminar colegio
+                    </span>
+                    <span className="text-xs font-black text-red-500">
+                      Abrir
+                    </span>
+                  </summary>
+
+                  <div className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold leading-relaxed text-red-800">
+                    <div className="flex gap-2">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <p>
+                        Esto elimina el colegio, sus organigramas, cajas,
+                        relaciones y personas cargadas. Usalo solo si lo creaste
+                        por error.
+                      </p>
+                    </div>
+
+                    <form action={deleteSchoolAction} className="mt-3">
+                      <input type="hidden" name="schoolId" value={school.id} />
+                      <button
+                        type="submit"
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-red-700"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Confirmar eliminación
+                      </button>
+                    </form>
+                  </div>
+                </details>
               </div>
             );
           })}
