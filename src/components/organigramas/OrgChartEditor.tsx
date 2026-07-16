@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import {
   createEdgeAction,
   createNodeAction,
@@ -259,7 +260,7 @@ function nodeToDraft(node: EditorNodeData): EditDraft {
     description: node.description ?? "",
     weeklyHours: node.weeklyHours?.toString() ?? "",
     color: getNodeColor(node.color, node.area),
-    icon: node.icon ?? "network",
+    icon: node.icon ?? getDefaultIconForArea(node.area),
     personId: node.person?.id ?? "__new__",
     personFirstName: node.person?.firstName ?? "",
     personLastName: node.person?.lastName ?? "",
@@ -386,7 +387,7 @@ function getReviewChecks(nodes: Node<EditorNodeData>[], edges: Edge[]) {
       title: "Cajas cargadas",
       detail:
         nodes.length > 0
-          ? `${nodes.length} cajas en el organigrama.`
+          ? `${nodes.length} áreas o funciones en el organigrama.`
           : "Todavía no hay cargos ni áreas.",
     },
     {
@@ -409,16 +410,16 @@ function getReviewChecks(nodes: Node<EditorNodeData>[], edges: Edge[]) {
       title: "Personas asignadas",
       detail:
         emptyPeople.length === 0
-          ? "Todas las cajas tienen personas o equipo."
-          : `${emptyPeople.length} cajas sin personas.`,
+          ? "Todas las áreas tienen personas o equipo."
+          : `${emptyPeople.length} áreas o funciones sin personas.`,
     },
     {
       ok: noRealFunction.length === 0,
       title: "Función real",
       detail:
         noRealFunction.length === 0
-          ? "Todas las cajas tienen función real."
-          : `${noRealFunction.length} cajas sin función real.`,
+          ? "Todas las áreas tienen función real."
+          : `${noRealFunction.length} áreas sin función real.`,
     },
     {
       ok: requiredAreas.every((area) => areas.has(area)),
@@ -543,6 +544,16 @@ export function OrgChartEditor({
   const [message, setMessage] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
 
+  useEffect(() => {
+    const guideSeen = window.localStorage.getItem("apdes-org-editor-guide-seen");
+    if (!guideSeen) setShowGuide(true);
+  }, []);
+
+  function closeGuide() {
+    window.localStorage.setItem("apdes-org-editor-guide-seen", "true");
+    setShowGuide(false);
+  }
+
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
@@ -551,6 +562,30 @@ export function OrgChartEditor({
     () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
     [edges, selectedEdgeId],
   );
+  const previewNodes = useMemo(() => {
+    if (!selectedNodeId || !draft) return nodes;
+
+    return nodes.map((node) =>
+      node.id === selectedNodeId
+        ? {
+            ...node,
+            data: {
+              ...node.data,
+              title: draft.title,
+              area: draft.area,
+              formalRole: draft.formalRole || null,
+              realFunction: draft.realFunction || null,
+              description: draft.description || null,
+              weeklyHours: draft.weeklyHours
+                ? Number(draft.weeklyHours)
+                : null,
+              color: draft.color,
+              icon: draft.icon,
+            },
+          }
+        : node,
+    );
+  }, [draft, nodes, selectedNodeId]);
   const reviewChecks = useMemo(
     () => getReviewChecks(nodes, edges),
     [nodes, edges],
@@ -922,9 +957,9 @@ export function OrgChartEditor({
 
   return (
     <>
-      {showGuide ? <EditorGuide onClose={() => setShowGuide(false)} /> : null}
+      {showGuide ? <EditorGuide onClose={closeGuide} /> : null}
       <div className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)_360px]">
-        <aside className="space-y-4 rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-5 xl:h-[720px] xl:overflow-y-auto">
+        <aside data-guide="panel" className="space-y-4 rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-5 xl:h-[720px] xl:overflow-y-auto">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-700">
               Panel de trabajo
@@ -950,13 +985,13 @@ export function OrgChartEditor({
             </button>
           </div>
 
-          <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
+          <div data-guide="create" className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900">
               <Plus className="h-4 w-4 text-blue-700" />
-              Crear nueva caja
+              Agregar área o función
             </div>
             <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-500">
-              Una caja representa un cargo, área o equipo del colegio. Después
+              Representa un cargo, área o equipo del colegio. Después
               la podés mover, conectar y completar con personas.
             </p>
             <div className="mt-4 space-y-3">
@@ -1013,12 +1048,12 @@ export function OrgChartEditor({
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-800"
               >
                 <Plus className="h-4 w-4" />
-                Crear caja
+                Agregar al organigrama
               </button>
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-100 bg-white p-4">
+          <div data-guide="relation" className="rounded-3xl border border-slate-100 bg-white p-4">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900">
               <Route className="h-4 w-4 text-blue-700" />
               Crear relación
@@ -1120,14 +1155,14 @@ export function OrgChartEditor({
           </button>
         </aside>
 
-        <section className="relative h-[720px] overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white shadow-sm">
+        <section data-guide="canvas" className="relative h-[720px] overflow-hidden rounded-[1.6rem] border border-slate-200 bg-white shadow-sm">
           <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-[320px] rounded-2xl border border-slate-200 bg-white/90 px-3 py-2 shadow-sm backdrop-blur">
             <div className="flex items-center gap-2 text-sm font-black text-slate-900">
               <MousePointer2 className="h-4 w-4 text-blue-700" />
               Editor visual
             </div>
             <p className="mt-1 text-xs font-medium text-slate-500">
-              Tocá una caja para editar. Arrastrá para mover. Usá “Ordenar
+              Tocá un área para editar. Arrastrá para mover. Usá “Ordenar
               automático” si queda desprolijo.
             </p>
           </div>
@@ -1139,7 +1174,7 @@ export function OrgChartEditor({
           ) : null}
 
           <ReactFlow
-            nodes={nodes}
+            nodes={previewNodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
@@ -1163,7 +1198,6 @@ export function OrgChartEditor({
             minZoom={0.12}
             maxZoom={1.15}
             panOnScroll
-            onlyRenderVisibleElements
           >
             <Background gap={34} size={1} color="#d7deea" />
             <Controls />
@@ -1171,6 +1205,11 @@ export function OrgChartEditor({
               pannable
               zoomable
               nodeStrokeWidth={3}
+              nodeStrokeColor="#ffffff"
+              nodeBorderRadius={8}
+              maskColor="rgba(148, 163, 184, 0.22)"
+              className="!overflow-hidden !rounded-2xl !border !border-slate-200 !bg-slate-50 !shadow-lg [&_.react-flow__minimap-node]:!visible [&_.react-flow__minimap-node]:!opacity-100"
+              style={{ backgroundColor: "#f8fafc" }}
               nodeColor={(node) =>
                 getNodeColor(
                   (node.data?.color as string | null | undefined) ?? null,
@@ -1181,18 +1220,18 @@ export function OrgChartEditor({
           </ReactFlow>
         </section>
 
-        <aside className="rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-5 xl:h-[720px] xl:overflow-y-auto">
+        <aside data-guide="details" className="rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm xl:sticky xl:top-5 xl:h-[720px] xl:overflow-y-auto">
           {selectedNode && draft ? (
             <div className="space-y-5">
               <PanelHeader
-                title="Editar caja"
+                title="Editar área o función"
                 subtitle="Contenido, color, icono, responsable y equipo."
                 onClose={() => setSelectedNodeId(null)}
               />
 
               <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs font-semibold leading-relaxed text-blue-900">
                 <p>
-                  <strong>Título:</strong> nombre visible de la caja.{" "}
+                  <strong>Título:</strong> nombre visible en el organigrama.{" "}
                   <strong>Cargo formal:</strong> puesto oficial.{" "}
                   <strong>Función real:</strong> lo que efectivamente sostiene
                   esa área. <strong>Horas:</strong> carga semanal estimada para
@@ -1339,7 +1378,7 @@ export function OrgChartEditor({
                   <UserRound className="h-4 w-4" /> Responsable principal
                 </div>
                 <p className="mb-3 text-xs font-semibold leading-relaxed text-blue-800/80">
-                  Persona que aparece como referente principal de la caja. El
+                  Persona que aparece como referente principal del área. El
                   equipo ampliado se carga más abajo.
                 </p>
                 <select
@@ -1427,7 +1466,7 @@ export function OrgChartEditor({
                 onClick={handleSaveNode}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-800"
               >
-                <Save className="h-4 w-4" /> Guardar caja
+                <Save className="h-4 w-4" /> Guardar cambios
               </button>
 
               <div className="rounded-3xl border border-slate-100 bg-white p-4">
@@ -1446,7 +1485,7 @@ export function OrgChartEditor({
                 </div>
 
                 <p className="mb-3 text-xs font-semibold leading-relaxed text-slate-500">
-                  Acá van las personas que participan en esta caja. El rol puede
+                  Acá van las personas que participan en esta área. El rol puede
                   ser responsable, equipo, apoyo o externo; esto después
                   alimenta el tablero de talento.
                 </p>
@@ -1602,7 +1641,7 @@ export function OrgChartEditor({
                 onClick={handleDeleteNode}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 transition hover:bg-rose-100"
               >
-                <Trash2 className="h-4 w-4" /> Eliminar caja
+                <Trash2 className="h-4 w-4" /> Eliminar área o función
               </button>
             </div>
           ) : selectedEdge ? (
@@ -1689,10 +1728,10 @@ export function OrgChartEditor({
               <div className="rounded-3xl border border-slate-100 bg-slate-50 p-5 text-center">
                 <Layers3 className="mx-auto h-9 w-9 text-blue-700" />
                 <h2 className="mt-3 text-xl font-black text-slate-950">
-                  Seleccioná una caja
+                  Seleccioná un área o función
                 </h2>
                 <p className="mt-2 text-sm font-medium leading-relaxed text-slate-500">
-                  Al tocar una caja vas a editar contenido, personas, horas,
+                  Al tocar un elemento vas a editar contenido, personas, horas,
                   color, icono y función real.
                 </p>
                 <button
@@ -1820,77 +1859,93 @@ export function OrgChartEditor({
 function EditorGuide({ onClose }: { onClose: () => void }) {
   const items = [
     {
-      title: "Caja",
-      body: "Representa un cargo, área o equipo. No tiene que ser siempre una persona: también puede ser Formación, Comunicación, Tutorías u Operaciones.",
+      target: "panel",
+      title: "Tu panel de trabajo",
+      body: "Desde acá construís el organigrama paso a paso. La guía queda siempre disponible desde el botón Cómo leer y editar.",
     },
     {
-      title: "Cargo formal y función real",
-      body: "Cargo formal es el puesto oficial. Función real es lo que esa persona o equipo realmente sostiene en la vida del colegio.",
+      target: "create",
+      title: "Agregar un área o función",
+      body: "Elegí el nombre, el área y su identidad visual. Después vas a poder asignar responsables, equipo y horas.",
     },
     {
-      title: "Personas y horas",
-      body: "Dentro de cada caja podés cargar responsable, equipo, apoyo o externo. Las horas ayudan a leer carga, cobertura y luego densidad de talento.",
+      target: "relation",
+      title: "Mostrar cómo trabajan juntos",
+      body: "Creá dependencias jerárquicas o vínculos de colaboración, acompañamiento, decisión e información.",
     },
     {
-      title: "Relaciones",
-      body: "La línea jerárquica muestra dependencia. Las relaciones transversales, colaboración, acompañamiento, decisión e información muestran cómo se trabaja entre áreas.",
+      target: "canvas",
+      title: "Organizar visualmente",
+      body: "Tocá un elemento para editarlo, arrastralo para moverlo y usá Ordenar automático cuando necesites recuperar una vista limpia.",
     },
     {
-      title: "Revisión",
-      body: "El checklist ayuda a detectar si faltan áreas críticas, funciones reales, personas asignadas o vínculos transversales antes de publicar.",
+      target: "details",
+      title: "Completar y revisar",
+      body: "Al seleccionar un área aparece su detalle. Sin selección, este panel muestra el checklist institucional antes de enviar o publicar.",
     },
   ];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
-      <div className="max-h-[86vh] w-full max-w-3xl overflow-y-auto rounded-[2rem] bg-white p-6 shadow-2xl">
+  const [step, setStep] = useState(0);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const current = items[step];
+
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
+
+  useEffect(() => {
+    const update = () => {
+      const element = document.querySelector<HTMLElement>(`[data-guide="${current.target}"]`);
+      if (!element) return setRect(null);
+      const nextRect = element.getBoundingClientRect();
+      if (nextRect.top < 16 || nextRect.bottom > window.innerHeight - 16) {
+        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        window.setTimeout(() => setRect(element.getBoundingClientRect()), 400);
+      } else {
+        setRect(nextRect);
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [current.target]);
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] touch-none overflow-hidden">
+      {rect ? (
+        <div
+          className="pointer-events-none absolute rounded-[1.8rem] border-2 border-blue-400 bg-transparent shadow-[0_0_0_8px_rgba(59,130,246,0.18),0_0_0_9999px_rgba(15,23,42,0.62)] transition-all duration-300"
+          style={{ left: Math.max(8, rect.left - 7), top: Math.max(8, rect.top - 7), width: Math.min(window.innerWidth - 16, rect.width + 14), height: rect.height + 14 }}
+        >
+          <span className="absolute -inset-1 animate-pulse rounded-[1.9rem] border-2 border-blue-300/70" />
+        </div>
+      ) : <div className="absolute inset-0 bg-slate-950/60" />}
+
+      <div className="absolute bottom-5 left-1/2 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-[2rem] border border-blue-100 bg-white p-5 shadow-2xl sm:bottom-8 sm:p-6">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-700">
-              Guía rápida
-            </p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">
-              Cómo leer y editar el organigrama
-            </h2>
-            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">
-              Esta pantalla sirve para armar el organigrama real del colegio y
-              dejarlo listo para revisión y talento.
-            </p>
+          <div><p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Guía rápida · {step + 1} de {items.length}</p><h2 className="mt-1 text-xl font-black text-slate-950 sm:text-2xl">{current.title}</h2><p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">{current.body}</p></div>
+          <button type="button" onClick={onClose} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50" aria-label="Cerrar guía"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <button type="button" onClick={onClose} className="text-sm font-black text-slate-500 hover:text-slate-900">Omitir guía</button>
+          <div className="flex gap-2">
+            {step > 0 ? <button type="button" onClick={() => setStep((value) => value - 1)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-700">Anterior</button> : null}
+            <button type="button" onClick={() => step === items.length - 1 ? onClose() : setStep((value) => value + 1)} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-800">{step === items.length - 1 ? "Finalizar" : "Siguiente"}</button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
-            aria-label="Cerrar guía"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
-          {items.map((item) => (
-            <div
-              key={item.title}
-              className="rounded-3xl border border-slate-100 bg-slate-50 p-4"
-            >
-              <div className="flex items-center gap-2 font-black text-slate-950">
-                <HelpCircle className="h-4 w-4 text-blue-700" />
-                {item.title}
-              </div>
-              <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">
-                {item.body}
-              </p>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-5 rounded-3xl border border-blue-100 bg-blue-50 p-4 text-sm font-semibold leading-relaxed text-blue-900">
-          Consejo práctico: primero creá o revisá las cajas principales, después
-          aplicá “iconos por área”, asigná personas y horas, conectá relaciones
-          y al final usá “Ordenar automático” antes de revisar el checklist.
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

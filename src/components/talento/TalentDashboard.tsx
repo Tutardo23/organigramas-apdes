@@ -13,11 +13,13 @@ import {
   HelpCircle,
   Layers3,
   MessageSquareText,
+  Plus,
   Save,
   Search,
   ShieldCheck,
   Sparkles,
   TrendingUp,
+  Trash2,
   UserRound,
   UsersRound,
   X,
@@ -363,7 +365,7 @@ export function TalentDashboard({ schoolSlug, schoolName, people, areaCoverage }
                 {area.peopleCount}
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-500">
-                personas · {area.hours} hs. · {area.nodesCount} cajas
+                personas · {area.hours} hs. · {area.nodesCount} funciones
               </p>
               <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
                 <div
@@ -395,7 +397,7 @@ export function TalentDashboard({ schoolSlug, schoolName, people, areaCoverage }
                 <p className="mt-4 max-w-3xl text-sm font-semibold leading-relaxed text-slate-500">
                   Esta ficha toma datos del organigrama y permite completar
                   potencial, competencias, capacitaciones, evaluaciones y notas
-                  para construir después el tablero de densidad de talento.
+                  para acompañar decisiones institucionales con información clara.
                 </p>
               </div>
 
@@ -457,7 +459,7 @@ export function TalentDashboard({ schoolSlug, schoolName, people, areaCoverage }
                       ))
                     ) : (
                       <div className="rounded-3xl bg-amber-50 p-4 text-sm font-bold text-amber-800 md:col-span-2">
-                        Esta persona todavía no está asociada a una caja del organigrama.
+                        Esta persona todavía no está asociada a un área del organigrama.
                       </div>
                     )}
                   </div>
@@ -522,25 +524,25 @@ export function TalentDashboard({ schoolSlug, schoolName, people, areaCoverage }
                     />
                   </label>
 
-                  <TalentTextArea
+                  <TalentItemsEditor
                     name="competenciesText"
                     label="Competencias"
-                    defaultValue={itemsToLines(selectedPerson.competencies)}
-                    placeholder="Liderazgo de equipos | Muy sólido | 4"
+                    initialItems={selectedPerson.competencies}
+                    placeholder="Ej. Liderazgo de equipos"
                   />
 
-                  <TalentTextArea
+                  <TalentItemsEditor
                     name="trainingsText"
                     label="Capacitaciones"
-                    defaultValue={itemsToLines(selectedPerson.trainings)}
-                    placeholder="Gestión educativa | APDES 2026"
+                    initialItems={selectedPerson.trainings}
+                    placeholder="Ej. Gestión educativa"
                   />
 
-                  <TalentTextArea
+                  <TalentItemsEditor
                     name="evaluationsText"
                     label="Evaluaciones"
-                    defaultValue={itemsToLines(selectedPerson.evaluations)}
-                    placeholder="Evaluación anual | Buen desempeño | 4"
+                    initialItems={selectedPerson.evaluations}
+                    placeholder="Ej. Evaluación anual"
                   />
                 </div>
 
@@ -559,7 +561,8 @@ export function TalentDashboard({ schoolSlug, schoolName, people, areaCoverage }
                     Guardado dinámico
                   </div>
                   Al guardar, la ficha se actualiza en pantalla y queda lista
-                  para usar en indicadores de densidad de talento.
+                  para futuras lecturas institucionales. La plataforma separa
+                  el avance de carga de cualquier indicador de talento oficial.
                 </div>
               </form>
             </div>
@@ -586,7 +589,7 @@ function TalentGuide({ onClose }: { onClose: () => void }) {
     },
     {
       title: "Horas totales",
-      body: "Suma las horas cargadas en las cajas donde participa cada persona. Sirve para ver carga y cobertura.",
+      body: "Suma las horas de las áreas donde participa cada persona. Sirve para ver carga y cobertura.",
     },
     {
       title: "Potencial",
@@ -594,11 +597,11 @@ function TalentGuide({ onClose }: { onClose: () => void }) {
     },
     {
       title: "Competencias, capacitaciones y evaluaciones",
-      body: "Se cargan en formato simple por líneas para que después se puedan transformar en indicadores y reportes.",
+      body: "Se agregan como registros independientes para que sean fáciles de actualizar y comparar.",
     },
     {
-      title: "Densidad de talento",
-      body: "Después se calcula cruzando personas, horas, roles, áreas cubiertas, perfiles críticos y formación disponible.",
+      title: "Información completada",
+      body: "Muestra cuánto se avanzó en la carga. No representa todavía la densidad de talento, que requerirá indicadores acordados por APDES.",
     },
   ];
 
@@ -631,33 +634,48 @@ function TalentGuide({ onClose }: { onClose: () => void }) {
   );
 }
 
-function TalentTextArea({
+function TalentItemsEditor({
   name,
   label,
-  defaultValue,
+  initialItems,
   placeholder,
 }: {
   name: string;
   label: string;
-  defaultValue: string;
+  initialItems: TalentItem[];
   placeholder: string;
 }) {
+  const [items, setItems] = useState<TalentItem[]>(initialItems);
+  const [draft, setDraft] = useState<TalentItem>({ title: "", detail: "" });
+
+  function addItem() {
+    if (!draft.title.trim()) return;
+    setItems((current) => [...current, { title: draft.title.trim(), detail: draft.detail?.trim() || undefined }]);
+    setDraft({ title: "", detail: "" });
+  }
+
   return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-black uppercase tracking-wide text-slate-500">
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <input type="hidden" name={name} value={itemsToLines(items)} />
+      <span className="block text-xs font-black uppercase tracking-wide text-slate-500">
         {label}
       </span>
-      <textarea
-        name={name}
-        defaultValue={defaultValue}
-        rows={4}
-        className={textareaClass("font-mono text-xs")}
-        placeholder={placeholder}
-      />
-      <p className="mt-1.5 text-[0.7rem] font-semibold text-slate-400">
-        Una línea por registro. Formato sugerido: título | detalle | puntaje.
-      </p>
-    </label>
+      <div className="mt-2 space-y-2">
+        {items.map((item, index) => (
+          <div key={`${item.title}-${index}`} className="flex items-start gap-2 rounded-xl bg-slate-50 p-2.5">
+            <div className="min-w-0 flex-1"><p className="truncate text-xs font-black text-slate-900">{item.title}</p>{item.detail ? <p className="mt-0.5 text-[0.7rem] font-semibold text-slate-500">{item.detail}</p> : null}</div>
+            <button type="button" onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-rose-600" aria-label={`Quitar ${item.title}`}><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 grid gap-2">
+        <input className={inputClass("px-3 py-2 text-xs")} value={draft.title} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} placeholder={placeholder} />
+        <div className="flex gap-2">
+          <input className={inputClass("px-3 py-2 text-xs")} value={draft.detail ?? ""} onChange={(event) => setDraft((current) => ({ ...current, detail: event.target.value }))} placeholder="Detalle o resultado" />
+          <button type="button" onClick={addItem} className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-blue-50 px-3 text-xs font-black text-blue-700 transition hover:bg-blue-100"><Plus className="h-3.5 w-3.5" /> Agregar</button>
+        </div>
+      </div>
+    </div>
   );
 }
 

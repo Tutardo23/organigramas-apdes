@@ -275,7 +275,9 @@ export function getNodeIconValue(
   icon: string | null | undefined,
   area: string,
 ) {
-  if (icon && icon !== "network") return icon;
+  // "network" es un icono real que el usuario puede elegir. Antes se usaba
+  // también como valor de respaldo y por eso la tarjeta mostraba otro icono.
+  if (icon) return icon;
   return getDefaultIconForArea(area);
 }
 
@@ -323,8 +325,8 @@ export function OrgNodeCard({
 
   return (
     <div
-      className={`group relative w-[235px] rounded-[1.5rem] p-[1px] transition ${
-        selected ? "scale-[1.015] shadow-2xl" : "shadow-md hover:shadow-xl"
+      className={`group relative w-[235px] rounded-[1.5rem] p-[1px] transition-shadow duration-200 ${
+        selected ? "shadow-2xl ring-4 ring-blue-100" : "shadow-md hover:shadow-xl"
       }`}
       style={{
         background: `linear-gradient(135deg, ${color}, rgba(226,232,240,0.92))`,

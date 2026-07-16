@@ -1,6 +1,7 @@
 import Link from "next/link";
 import {
   AlertTriangle,
+  ArrowRight,
   Building2,
   CalendarDays,
   Home,
@@ -9,6 +10,7 @@ import {
   Settings2,
   Trash2,
 } from "lucide-react";
+import { DemoBadge } from "../../components/DemoBadge";
 import { createSchoolAndOrgChartAction, deleteSchoolAction } from "./actions";
 import { prisma } from "../../lib/prisma";
 
@@ -45,25 +47,23 @@ export default async function OrganigramasPage() {
             Menú principal
           </Link>
 
-          <p className="text-sm font-semibold text-slate-500">
-            Desde acá podés crear, editar, ver o eliminar colegios cargados por error.
-          </p>
+          <DemoBadge />
         </div>
 
-        <div className="mb-8 grid gap-5 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="mb-8 grid gap-5 lg:grid-cols-[minmax(0,1fr)_390px]">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-7 shadow-sm">
             <p className="text-sm font-black uppercase tracking-[0.22em] text-blue-700">
               APDES
             </p>
 
-            <h1 className="mt-3 text-4xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-3 text-4xl font-semibold tracking-[-0.035em] text-slate-950">
               Organigramas institucionales
             </h1>
 
             <p className="mt-4 max-w-3xl text-base font-medium leading-relaxed text-slate-600">
-              Plataforma para construir, revisar y actualizar los organigramas de
-              cada colegio. Cada organigrama puede tener cargos, funciones reales,
-              personas asignadas, horas y relaciones jerárquicas o transversales.
+              Elegí un colegio para leer su estructura, revisar responsabilidades
+              y reconocer cómo colaboran sus áreas. La edición aparece solo cuando
+              realmente la necesitás.
             </p>
           </div>
 
@@ -77,10 +77,10 @@ export default async function OrganigramasPage() {
               </div>
               <div>
                 <h2 className="text-lg font-black text-slate-950">
-                  Crear nuevo
+                  Agregar colegio
                 </h2>
                 <p className="text-sm font-medium text-slate-500">
-                  Crea un colegio y su organigrama inicial.
+                  Inicia una estructura institucional vacía.
                 </p>
               </div>
             </div>
@@ -115,7 +115,7 @@ export default async function OrganigramasPage() {
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-800"
               >
                 <Plus className="h-4 w-4" />
-                Crear y editar
+                Crear estructura
               </button>
             </div>
           </form>
@@ -169,27 +169,27 @@ export default async function OrganigramasPage() {
                   )}
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-3">
+                <div className="mt-5 grid grid-cols-[1fr_auto] gap-3">
                   <Link
                     href={`/organigramas/${school.slug}`}
-                    className="rounded-2xl border border-slate-200 px-4 py-3 text-center text-sm font-black text-slate-700 transition hover:bg-slate-50"
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-blue-800"
                   >
-                    Ver
+                    Abrir organigrama <ArrowRight className="h-4 w-4" />
                   </Link>
                   <Link
                     href={`/organigramas/${school.slug}/editar`}
-                    className="flex items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-blue-800"
+                    className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-black text-slate-600 transition hover:bg-slate-50"
+                    aria-label={`Editar organigrama de ${school.name}`}
                   >
                     <Settings2 className="h-4 w-4" />
-                    Editar
                   </Link>
                 </div>
 
-                <details className="mt-3 rounded-2xl border border-red-100 bg-red-50/60 p-3">
+                <details className="mt-3 rounded-2xl border border-slate-100 bg-slate-50 p-3">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-red-700 [&::-webkit-details-marker]:hidden">
                     <span className="inline-flex items-center gap-2">
-                      <Trash2 className="h-4 w-4" />
-                      Eliminar colegio
+                      <Settings2 className="h-4 w-4 text-slate-500" />
+                      <span className="text-slate-600">Administración</span>
                     </span>
                     <span className="text-xs font-black text-red-500">
                       Abrir

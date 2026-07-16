@@ -102,7 +102,7 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
             <p className="mt-4 text-xs font-black uppercase tracking-[0.22em] text-blue-700">Editor visual</p>
             <h1 className="mt-1 text-2xl font-black text-slate-950">{school.name}</h1>
             <p className="mt-1 max-w-3xl text-sm font-semibold leading-relaxed text-slate-500">
-              Mové cajas con el mouse, tocá para editar, agregá personas con horas y usá la guía rápida para entender cada campo. Esta base después alimenta el tablero de talento.
+              Mové áreas y funciones con el mouse, tocá para editar, agregá personas con horas y usá la guía rápida para entender cada campo. Esta base alimenta el tablero de talento.
             </p>
           </div>
 

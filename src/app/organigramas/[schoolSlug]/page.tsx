@@ -146,7 +146,7 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
           </div>
 
           {currentChart && visualNodes.length > 0 ? (
-            <OrgChartCanvas nodes={visualNodes} edges={visualEdges} />
+            <OrgChartCanvas nodes={visualNodes} edges={visualEdges} schoolSlug={school.slug} />
           ) : (
             <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
               <h2 className="text-xl font-black text-slate-950">Este colegio todavía no tiene nodos cargados</h2>

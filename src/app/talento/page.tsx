@@ -18,6 +18,8 @@ export const metadata = {
     "Dashboard dinámico de talento institucional conectado con organigramas, personas, funciones y horas.",
 };
 
+export const dynamic = "force-dynamic";
+
 type SchoolWithTalent = {
   id: string;
   name: string;
@@ -28,6 +30,9 @@ type SchoolWithTalent = {
     id: string;
     potentialLevel: string | null;
     weeklyHours: number | null;
+    competencies: unknown;
+    trainings: unknown;
+    evaluations: unknown;
   }>;
   orgCharts: Array<{
     id: string;
@@ -77,14 +82,17 @@ function getSchoolStats(school: SchoolWithTalent) {
     (person) => person.potentialLevel && person.potentialLevel !== "SIN_DEFINIR",
   ).length;
 
-  const density = Math.min(
-    100,
-    Math.round(
-      peopleCount === 0
-        ? 0
-        : areas.size * 8 + assignedNodePeople.size * 4 + peopleWithTalent * 5,
-    ),
-  );
+  const completionPoints = school.people.reduce((total, person) => {
+    const hasItems = (value: unknown) => Array.isArray(value) && value.length > 0;
+    return total
+      + (person.potentialLevel && person.potentialLevel !== "SIN_DEFINIR" ? 1 : 0)
+      + (hasItems(person.competencies) ? 1 : 0)
+      + (hasItems(person.trainings) ? 1 : 0)
+      + (hasItems(person.evaluations) ? 1 : 0);
+  }, 0);
+  const informationCompletion = peopleCount === 0
+    ? 0
+    : Math.round((completionPoints / (peopleCount * 4)) * 100);
 
   return {
     chart,
@@ -93,14 +101,14 @@ function getSchoolStats(school: SchoolWithTalent) {
     areasCount: areas.size,
     totalHours,
     peopleWithTalent,
-    density,
+    informationCompletion,
   };
 }
 
-function densityLabel(value: number) {
-  if (value >= 75) return "Alta";
-  if (value >= 45) return "Media";
-  if (value > 0) return "Inicial";
+function completionLabel(value: number) {
+  if (value >= 85) return "Información completa";
+  if (value >= 50) return "En progreso";
+  if (value > 0) return "Recién iniciada";
   return "Sin datos";
 }
 
@@ -114,6 +122,9 @@ export default async function TalentoPage() {
           id: true,
           weeklyHours: true,
           potentialLevel: true,
+          competencies: true,
+          trainings: true,
+          evaluations: true,
         },
       },
       orgCharts: {
@@ -145,14 +156,14 @@ export default async function TalentoPage() {
       acc.nodes += stats.nodesCount;
       acc.hours += stats.totalHours;
       acc.withTalent += stats.peopleWithTalent;
-      acc.density += stats.density;
+      acc.completion += stats.informationCompletion;
       return acc;
     },
-    { people: 0, nodes: 0, hours: 0, withTalent: 0, density: 0 },
+    { people: 0, nodes: 0, hours: 0, withTalent: 0, completion: 0 },
   );
 
-  const averageDensity = schools.length
-    ? Math.round(totals.density / schools.length)
+  const averageCompletion = schools.length
+    ? Math.round(totals.completion / schools.length)
     : 0;
 
   return (
@@ -176,8 +187,8 @@ export default async function TalentoPage() {
                 Dashboard de talento institucional
               </h1>
               <p className="mt-3 max-w-3xl text-sm font-semibold leading-relaxed text-slate-500">
-                Una primera versión dinámica para leer personas, funciones, horas,
-                áreas cubiertas y potencial desde la misma base del organigrama.
+                Leé personas, funciones, horas, competencias, capacitaciones y
+                evaluaciones desde la misma base del organigrama.
               </p>
             </div>
 
@@ -205,9 +216,9 @@ export default async function TalentoPage() {
               </div>
               <div className="rounded-3xl bg-emerald-50 p-4 text-emerald-800">
                 <BrainCircuit className="h-5 w-5" />
-                <p className="mt-2 text-2xl font-black">{averageDensity}%</p>
+                <p className="mt-2 text-2xl font-black">{averageCompletion}%</p>
                 <p className="text-xs font-black uppercase tracking-wide">
-                  Densidad
+                  Información completa
                 </p>
               </div>
             </div>
@@ -217,7 +228,7 @@ export default async function TalentoPage() {
         <div className="grid gap-4 lg:grid-cols-3">
           {schools.map((school) => {
             const stats = getSchoolStats(school);
-            const density = densityLabel(stats.density);
+            const completion = completionLabel(stats.informationCompletion);
 
             return (
               <Link
@@ -273,10 +284,10 @@ export default async function TalentoPage() {
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-black uppercase tracking-[0.15em] text-slate-400">
-                        Densidad de talento
+                        Información de talento
                       </p>
                       <p className="mt-1 text-xl font-black text-slate-950">
-                        {density}
+                        {completion}
                       </p>
                     </div>
                     <BarChart3 className="h-6 w-6 text-blue-700" />
@@ -284,7 +295,7 @@ export default async function TalentoPage() {
                   <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
                     <div
                       className="h-full rounded-full bg-blue-700"
-                      style={{ width: `${stats.density}%` }}
+                      style={{ width: `${stats.informationCompletion}%` }}
                     />
                   </div>
                 </div>

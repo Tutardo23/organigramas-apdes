@@ -14,7 +14,8 @@ import {
   type NodeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { FileText, GitBranch, Info, Layers3, Mail, Phone, UserRound, UsersRound, X } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, FileText, GitBranch, Info, Layers3, Mail, Phone, UserRound, UsersRound, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import {
   OrgNodeCard,
@@ -29,6 +30,7 @@ import {
 type Props = {
   nodes: OrgNodeData[];
   edges: OrgEdgeData[];
+  schoolSlug: string;
 };
 
 function ViewerNode({ data, selected }: NodeProps<Node<OrgNodeData>>) {
@@ -77,7 +79,7 @@ function buildEdge(edge: OrgEdgeData): Edge {
   };
 }
 
-export function OrgChartCanvas({ nodes, edges }: Props) {
+export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
@@ -87,6 +89,11 @@ export function OrgChartCanvas({ nodes, edges }: Props) {
       type: "orgNode",
       position: { x: node.positionX, y: node.positionY },
       data: node,
+      // La vista es de solo lectura y no usa onNodesChange. Sin medidas
+      // iniciales, React Flow muestra las tarjetas pero no crea sus figuras
+      // dentro del MiniMap.
+      initialWidth: 235,
+      initialHeight: 180,
       draggable: false,
       selectable: true,
     }));
@@ -106,7 +113,7 @@ export function OrgChartCanvas({ nodes, edges }: Props) {
             Vista institucional
           </div>
           <p className="mt-1 text-xs font-medium text-slate-500">
-            Tocá una caja para ver personas, horas, función y vínculos.
+            Tocá un área o función para ver personas, horas y vínculos.
           </p>
         </div>
 
@@ -119,7 +126,6 @@ export function OrgChartCanvas({ nodes, edges }: Props) {
           minZoom={0.14}
           maxZoom={1.18}
           panOnScroll
-          onlyRenderVisibleElements
           onNodeClick={(_, node) => setSelectedNodeId(node.id)}
           onPaneClick={() => setSelectedNodeId(null)}
         >
@@ -144,7 +150,7 @@ export function OrgChartCanvas({ nodes, edges }: Props) {
           <div>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-700">Detalle del nodo</p>
+                <p className="text-xs font-black uppercase tracking-[0.2em] text-blue-700">Detalle institucional</p>
                 <h2 className="mt-2 text-2xl font-black tracking-tight text-slate-950">{selectedNode.title}</h2>
               </div>
               <button type="button" onClick={() => setSelectedNodeId(null)} className="rounded-full border border-slate-200 p-2 text-slate-500 transition hover:bg-slate-50 hover:text-slate-900" aria-label="Cerrar detalle">
@@ -187,11 +193,16 @@ export function OrgChartCanvas({ nodes, edges }: Props) {
               {selectedNode.realFunction ? <DetailBlock label="Función real" value={selectedNode.realFunction} /> : null}
               {selectedNode.description ? <DetailBlock label="Observaciones" value={selectedNode.description} /> : null}
             </div>
+            {selectedNode.person ? (
+              <Link href={`/talento/${schoolSlug}`} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white transition hover:bg-blue-800">
+                Ver ficha de talento <ArrowRight className="h-4 w-4" />
+              </Link>
+            ) : null}
           </div>
         ) : (
           <div className="flex min-h-[420px] flex-col items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
             <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700"><Info className="h-6 w-6" /></div>
-            <h2 className="mt-4 text-xl font-black text-slate-950">Seleccioná una caja</h2>
+            <h2 className="mt-4 text-xl font-black text-slate-950">Seleccioná un área o función</h2>
             <p className="mt-2 text-sm leading-relaxed text-slate-500">Al tocar un cargo o área vas a ver responsables, equipo, horas, función real y observaciones.</p>
           </div>
         )}
