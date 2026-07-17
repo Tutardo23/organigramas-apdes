@@ -2,6 +2,7 @@
 
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MarkerType,
@@ -129,7 +130,12 @@ export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
           onNodeClick={(_, node) => setSelectedNodeId(node.id)}
           onPaneClick={() => setSelectedNodeId(null)}
         >
-          <Background gap={34} size={1} color="#d7deea" />
+          <Background
+            variant={BackgroundVariant.Lines}
+            gap={28}
+            size={1}
+            color="#e8eef6"
+          />
           <Controls />
           <MiniMap
             pannable

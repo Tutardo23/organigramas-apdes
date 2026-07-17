@@ -2,6 +2,7 @@
 
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Handle,
   MarkerType,
@@ -39,8 +40,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   createEdgeAction,
   createNodeAction,
@@ -147,6 +147,11 @@ type RelationDraft = {
   label: string;
 };
 
+type EdgeEditDraft = {
+  type: string;
+  label: string;
+};
+
 const areaOptions = Object.keys(areaLabels);
 const edgeTypeOptions = Object.keys(edgeLabels);
 const memberRoleOptions = Object.keys(memberRoleLabels);
@@ -161,6 +166,11 @@ const defaultNewNode: NewNodeDraft = {
 const defaultRelation: RelationDraft = {
   sourceId: "",
   targetId: "",
+  type: "JERARQUICA",
+  label: "",
+};
+
+const defaultEdgeEditDraft: EdgeEditDraft = {
   type: "JERARQUICA",
   label: "",
 };
@@ -229,12 +239,18 @@ function toFlowNode(node: EditorNodeData): Node<EditorNodeData> {
 function toFlowEdge(edge: EditorEdgeData): Edge {
   const isMain = edge.type === "JERARQUICA";
   const stroke = edgeColors[edge.type] ?? "#64748b";
+  const normalizedLabel = edge.label?.trim() || null;
+  const rawLabel = normalizedLabel && Object.values(edgeLabels).some(
+    (label) => label.toLowerCase() === normalizedLabel.toLowerCase(),
+  )
+    ? null
+    : normalizedLabel;
 
   return {
     id: edge.id,
     source: edge.sourceId,
     target: edge.targetId,
-    label: edge.label || (!isMain ? edgeLabels[edge.type] : undefined),
+    label: rawLabel || (!isMain ? edgeLabels[edge.type] : undefined),
     type: "smoothstep",
     animated: !isMain,
     markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
@@ -247,7 +263,7 @@ function toFlowEdge(edge: EditorEdgeData): Edge {
     labelBgStyle: { fill: "#ffffff", fillOpacity: 0.96 },
     labelBgPadding: [8, 5],
     labelBgBorderRadius: 999,
-    data: { edgeType: edge.type, rawLabel: edge.label },
+    data: { edgeType: edge.type, rawLabel },
   };
 }
 
@@ -260,7 +276,7 @@ function nodeToDraft(node: EditorNodeData): EditDraft {
     description: node.description ?? "",
     weeklyHours: node.weeklyHours?.toString() ?? "",
     color: getNodeColor(node.color, node.area),
-    icon: node.icon ?? getDefaultIconForArea(node.area),
+    icon: node.icon ?? "network",
     personId: node.person?.id ?? "__new__",
     personFirstName: node.person?.firstName ?? "",
     personLastName: node.person?.lastName ?? "",
@@ -540,9 +556,12 @@ export function OrgChartEditor({
     useState<NewNodeDraft>(defaultNewNode);
   const [relationDraft, setRelationDraft] =
     useState<RelationDraft>(defaultRelation);
+  const [edgeEditDraft, setEdgeEditDraft] =
+    useState<EdgeEditDraft>(defaultEdgeEditDraft);
   const [reviewDraft, setReviewDraft] = useState({ title: "", body: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
+  const initializedNodeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const guideSeen = window.localStorage.getItem("apdes-org-editor-guide-seen");
@@ -562,30 +581,6 @@ export function OrgChartEditor({
     () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
     [edges, selectedEdgeId],
   );
-  const previewNodes = useMemo(() => {
-    if (!selectedNodeId || !draft) return nodes;
-
-    return nodes.map((node) =>
-      node.id === selectedNodeId
-        ? {
-            ...node,
-            data: {
-              ...node.data,
-              title: draft.title,
-              area: draft.area,
-              formalRole: draft.formalRole || null,
-              realFunction: draft.realFunction || null,
-              description: draft.description || null,
-              weeklyHours: draft.weeklyHours
-                ? Number(draft.weeklyHours)
-                : null,
-              color: draft.color,
-              icon: draft.icon,
-            },
-          }
-        : node,
-    );
-  }, [draft, nodes, selectedNodeId]);
   const reviewChecks = useMemo(
     () => getReviewChecks(nodes, edges),
     [nodes, edges],
@@ -593,18 +588,26 @@ export function OrgChartEditor({
   const readyCount = reviewChecks.filter((check) => check.ok).length;
 
   useEffect(() => {
-    if (selectedNode) {
-      setDraft(nodeToDraft(selectedNode.data));
+    if (!selectedNodeId) {
+      initializedNodeIdRef.current = null;
+      setDraft(null);
+      return;
+    }
+
+    if (initializedNodeIdRef.current === selectedNodeId) return;
+
+    const nodeToEdit = nodes.find((node) => node.id === selectedNodeId);
+    if (nodeToEdit) {
+      initializedNodeIdRef.current = selectedNodeId;
+      setDraft(nodeToDraft(nodeToEdit.data));
       setRelationDraft((current) => ({
         ...current,
-        sourceId: selectedNode.id,
-        targetId: current.targetId === selectedNode.id ? "" : current.targetId,
+        sourceId: nodeToEdit.id,
+        targetId: current.targetId === nodeToEdit.id ? "" : current.targetId,
       }));
       setMemberDraft(defaultMemberDraft);
-    } else {
-      setDraft(null);
     }
-  }, [selectedNode]);
+  }, [nodes, selectedNodeId]);
 
   function showMessage(value: string) {
     setMessage(value);
@@ -679,6 +682,48 @@ export function OrgChartEditor({
     if (input.sourceId === input.targetId)
       return showMessage("La relación no puede ir al mismo nodo");
 
+    const existingEdge = edges.find(
+      (edge) =>
+        edge.source === input.sourceId && edge.target === input.targetId,
+    );
+
+    if (existingEdge) {
+      startTransition(async () => {
+        try {
+          const updated = await updateEdgeAction({
+            edgeId: existingEdge.id,
+            schoolSlug,
+            type: input.type,
+            label: input.label,
+          });
+          const updatedFlowEdge = toFlowEdge({
+            id: updated.id,
+            sourceId: updated.sourceId,
+            targetId: updated.targetId,
+            type: updated.type,
+            label: updated.label,
+          });
+          setEdges((current) =>
+            current.map((edge) =>
+              edge.id === updated.id ? updatedFlowEdge : edge,
+            ),
+          );
+          setSelectedEdgeId(updated.id);
+          setSelectedNodeId(null);
+          setEdgeEditDraft({
+            type: updated.type,
+            label:
+              (updatedFlowEdge.data?.rawLabel as string | undefined) ?? "",
+          });
+          setRelationDraft(defaultRelation);
+          showMessage("Relación existente actualizada");
+        } catch {
+          showMessage("No se pudo actualizar la relación");
+        }
+      });
+      return;
+    }
+
     const temporaryId = `temp-edge-${Date.now()}`;
     const optimistic = toFlowEdge({
       id: temporaryId,
@@ -714,6 +759,10 @@ export function OrgChartEditor({
         );
         setSelectedEdgeId(created.id);
         setSelectedNodeId(null);
+        setEdgeEditDraft({
+          type: created.type,
+          label: created.label ?? "",
+        });
         setRelationDraft(defaultRelation);
         showMessage("Relación creada");
       } catch {
@@ -807,32 +856,38 @@ export function OrgChartEditor({
   function handleSaveNode() {
     if (!selectedNode || !draft) return;
     startTransition(async () => {
-      const result = await updateNodeAction({
-        nodeId: selectedNode.id,
-        schoolSlug,
-        title: draft.title,
-        area: draft.area,
-        formalRole: draft.formalRole,
-        realFunction: draft.realFunction,
-        description: draft.description,
-        weeklyHours: draft.weeklyHours,
-        color: draft.color,
-        icon: draft.icon,
-        personId: draft.personId,
-        personFirstName: draft.personFirstName,
-        personLastName: draft.personLastName,
-        personEmail: draft.personEmail,
-        personPhone: draft.personPhone,
-      });
-      updateNodeInState(result.node as EditorNodeData);
-      if (result.person) {
-        setPeople((current) =>
-          current.some((person) => person.id === result.person.id)
-            ? current
-            : [...current, result.person],
-        );
+      try {
+        const result = await updateNodeAction({
+          nodeId: selectedNode.id,
+          schoolSlug,
+          title: draft.title,
+          area: draft.area,
+          formalRole: draft.formalRole,
+          realFunction: draft.realFunction,
+          description: draft.description,
+          weeklyHours: draft.weeklyHours,
+          color: draft.color,
+          icon: draft.icon,
+          personId: draft.personId,
+          personFirstName: draft.personFirstName,
+          personLastName: draft.personLastName,
+          personEmail: draft.personEmail,
+          personPhone: draft.personPhone,
+        });
+        const updatedNode = result.node as EditorNodeData;
+        updateNodeInState(updatedNode);
+        setDraft(nodeToDraft(updatedNode));
+        if (result.person) {
+          setPeople((current) =>
+            current.some((person) => person.id === result.person.id)
+              ? current
+              : [...current, result.person],
+          );
+        }
+        showMessage("Caja guardada");
+      } catch {
+        showMessage("No se pudo guardar la caja");
       }
-      showMessage("Caja guardada");
     });
   }
 
@@ -879,30 +934,41 @@ export function OrgChartEditor({
 
   function handleSaveEdge() {
     if (!selectedEdge) return;
-    const edgeType =
-      (selectedEdge.data?.edgeType as string | undefined) ?? "JERARQUICA";
-    const rawLabel = (selectedEdge.data?.rawLabel as string | undefined) ?? "";
     startTransition(async () => {
-      const updated = await updateEdgeAction({
-        edgeId: selectedEdge.id,
-        schoolSlug,
-        type: edgeType,
-        label: rawLabel,
-      });
-      setEdges((current) =>
-        current.map((edge) =>
-          edge.id === updated.id
-            ? toFlowEdge({
-                id: updated.id,
-                sourceId: updated.sourceId,
-                targetId: updated.targetId,
-                type: updated.type,
-                label: updated.label,
-              })
-            : edge,
-        ),
-      );
-      showMessage("Relación guardada");
+      try {
+        const updated = await updateEdgeAction({
+          edgeId: selectedEdge.id,
+          schoolSlug,
+          type: edgeEditDraft.type,
+          label: edgeEditDraft.label,
+        });
+        const updatedFlowEdge = toFlowEdge({
+          id: updated.id,
+          sourceId: updated.sourceId,
+          targetId: updated.targetId,
+          type: updated.type,
+          label: updated.label,
+        });
+        setEdges((current) => {
+          const withoutDuplicates = current.filter(
+            (edge) =>
+              edge.id === updated.id ||
+              edge.source !== updated.sourceId ||
+              edge.target !== updated.targetId,
+          );
+          return withoutDuplicates.map((edge) =>
+            edge.id === updated.id ? updatedFlowEdge : edge,
+          );
+        });
+        setEdgeEditDraft({
+          type: updated.type,
+          label:
+            (updatedFlowEdge.data?.rawLabel as string | undefined) ?? "",
+        });
+        showMessage("Relación guardada");
+      } catch {
+        showMessage("No se pudo guardar la relación");
+      }
     });
   }
 
@@ -1174,7 +1240,7 @@ export function OrgChartEditor({
           ) : null}
 
           <ReactFlow
-            nodes={previewNodes}
+            nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
@@ -1188,6 +1254,13 @@ export function OrgChartEditor({
             onEdgeClick={(_, edge) => {
               setSelectedEdgeId(edge.id);
               setSelectedNodeId(null);
+              setEdgeEditDraft({
+                type:
+                  (edge.data?.edgeType as string | undefined) ??
+                  "JERARQUICA",
+                label:
+                  (edge.data?.rawLabel as string | undefined) ?? "",
+              });
             }}
             onPaneClick={() => {
               setSelectedNodeId(null);
@@ -1199,17 +1272,17 @@ export function OrgChartEditor({
             maxZoom={1.15}
             panOnScroll
           >
-            <Background gap={34} size={1} color="#d7deea" />
+            <Background
+              variant={BackgroundVariant.Lines}
+              gap={28}
+              size={1}
+              color="#d7e1ee"
+            />
             <Controls />
             <MiniMap
               pannable
               zoomable
               nodeStrokeWidth={3}
-              nodeStrokeColor="#ffffff"
-              nodeBorderRadius={8}
-              maskColor="rgba(148, 163, 184, 0.22)"
-              className="!overflow-hidden !rounded-2xl !border !border-slate-200 !bg-slate-50 !shadow-lg [&_.react-flow__minimap-node]:!visible [&_.react-flow__minimap-node]:!opacity-100"
-              style={{ backgroundColor: "#f8fafc" }}
               nodeColor={(node) =>
                 getNodeColor(
                   (node.data?.color as string | null | undefined) ?? null,
@@ -1659,24 +1732,19 @@ export function OrgChartEditor({
               </div>
               <select
                 className={inputClass()}
-                value={(selectedEdge.data?.edgeType as string) ?? "JERARQUICA"}
-                onChange={(event) =>
-                  setEdges((current) =>
-                    current.map((edge) =>
-                      edge.id === selectedEdge.id
-                        ? toFlowEdge({
-                            id: edge.id,
-                            sourceId: edge.source,
-                            targetId: edge.target,
-                            type: event.target.value,
-                            label:
-                              (edge.data?.rawLabel as string | undefined) ??
-                              null,
-                          })
-                        : edge,
-                    ),
-                  )
-                }
+                value={edgeEditDraft.type}
+                onChange={(event) => {
+                  const nextType = event.target.value;
+                  setEdgeEditDraft((current) => ({
+                    type: nextType,
+                    label: Object.values(edgeLabels).some(
+                      (label) =>
+                        label.toLowerCase() === current.label.toLowerCase(),
+                    )
+                      ? ""
+                      : current.label,
+                  }));
+                }}
               >
                 {edgeTypeOptions.map((type) => (
                   <option key={type} value={type}>
@@ -1686,25 +1754,12 @@ export function OrgChartEditor({
               </select>
               <input
                 className={inputClass()}
-                value={
-                  (selectedEdge.data?.rawLabel as string | undefined) ?? ""
-                }
+                value={edgeEditDraft.label}
                 onChange={(event) =>
-                  setEdges((current) =>
-                    current.map((edge) =>
-                      edge.id === selectedEdge.id
-                        ? toFlowEdge({
-                            id: edge.id,
-                            sourceId: edge.source,
-                            targetId: edge.target,
-                            type:
-                              (edge.data?.edgeType as string | undefined) ??
-                              "JERARQUICA",
-                            label: event.target.value,
-                          })
-                        : edge,
-                    ),
-                  )
+                  setEdgeEditDraft((current) => ({
+                    ...current,
+                    label: event.target.value,
+                  }))
                 }
                 placeholder="Etiqueta"
               />
@@ -1890,25 +1945,13 @@ function EditorGuide({ onClose }: { onClose: () => void }) {
   const current = items[step];
 
   useEffect(() => {
-    const previousBodyOverflow = document.body.style.overflow;
-    const previousHtmlOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-
-    return () => {
-      document.body.style.overflow = previousBodyOverflow;
-      document.documentElement.style.overflow = previousHtmlOverflow;
-    };
-  }, []);
-
-  useEffect(() => {
     const update = () => {
       const element = document.querySelector<HTMLElement>(`[data-guide="${current.target}"]`);
       if (!element) return setRect(null);
       const nextRect = element.getBoundingClientRect();
       if (nextRect.top < 16 || nextRect.bottom > window.innerHeight - 16) {
-        element.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-        window.setTimeout(() => setRect(element.getBoundingClientRect()), 400);
+        window.scrollTo({ top: Math.max(0, window.scrollY + nextRect.top - 80), behavior: "smooth" });
+        window.setTimeout(() => setRect(element.getBoundingClientRect()), 350);
       } else {
         setRect(nextRect);
       }
@@ -1918,20 +1961,18 @@ function EditorGuide({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("resize", update);
   }, [current.target]);
 
-  if (typeof document === "undefined") return null;
-
-  return createPortal(
-    <div className="fixed inset-0 z-[100] touch-none overflow-hidden">
+  return (
+    <div className="pointer-events-none fixed inset-0 z-50">
       {rect ? (
         <div
-          className="pointer-events-none absolute rounded-[1.8rem] border-2 border-blue-400 bg-transparent shadow-[0_0_0_8px_rgba(59,130,246,0.18),0_0_0_9999px_rgba(15,23,42,0.62)] transition-all duration-300"
+          className="absolute rounded-[1.8rem] border-2 border-blue-400 bg-transparent shadow-[0_0_0_8px_rgba(59,130,246,0.18),0_0_0_9999px_rgba(15,23,42,0.62)] transition-all duration-300"
           style={{ left: Math.max(8, rect.left - 7), top: Math.max(8, rect.top - 7), width: Math.min(window.innerWidth - 16, rect.width + 14), height: rect.height + 14 }}
         >
           <span className="absolute -inset-1 animate-pulse rounded-[1.9rem] border-2 border-blue-300/70" />
         </div>
       ) : <div className="absolute inset-0 bg-slate-950/60" />}
 
-      <div className="absolute bottom-5 left-1/2 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-[2rem] border border-blue-100 bg-white p-5 shadow-2xl sm:bottom-8 sm:p-6">
+      <div className="pointer-events-auto absolute bottom-5 left-1/2 w-[calc(100%-2rem)] max-w-xl -translate-x-1/2 rounded-[2rem] border border-blue-100 bg-white p-5 shadow-2xl sm:bottom-8 sm:p-6">
         <div className="flex items-start justify-between gap-4">
           <div><p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Guía rápida · {step + 1} de {items.length}</p><h2 className="mt-1 text-xl font-black text-slate-950 sm:text-2xl">{current.title}</h2><p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">{current.body}</p></div>
           <button type="button" onClick={onClose} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50" aria-label="Cerrar guía"><X className="h-4 w-4" /></button>
@@ -1944,8 +1985,7 @@ function EditorGuide({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
-    </div>,
-    document.body,
+    </div>
   );
 }
 

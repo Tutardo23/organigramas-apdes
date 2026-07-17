@@ -390,15 +390,31 @@ export async function createEdgeAction(input: {
   type: string;
   label?: string | null;
 }) {
-  const edge = await (prisma as any).orgEdge.create({
-    data: {
+  const existingEdge = await (prisma as any).orgEdge.findFirst({
+    where: {
       orgChartId: input.orgChartId,
       sourceId: input.sourceId,
       targetId: input.targetId,
-      type: safeEdgeType(input.type),
-      label: textOrNull(input.label),
     },
   });
+
+  const edge = existingEdge
+    ? await (prisma as any).orgEdge.update({
+        where: { id: existingEdge.id },
+        data: {
+          type: safeEdgeType(input.type),
+          label: textOrNull(input.label),
+        },
+      })
+    : await (prisma as any).orgEdge.create({
+        data: {
+          orgChartId: input.orgChartId,
+          sourceId: input.sourceId,
+          targetId: input.targetId,
+          type: safeEdgeType(input.type),
+          label: textOrNull(input.label),
+        },
+      });
 
   revalidateOrganigrama(input.schoolSlug);
   return edge;
@@ -410,11 +426,30 @@ export async function updateEdgeAction(input: {
   type: string;
   label?: string | null;
 }) {
+  const currentEdge = await (prisma as any).orgEdge.findUnique({
+    where: { id: input.edgeId },
+  });
+
+  if (!currentEdge) {
+    throw new Error("No se encontró la relación para actualizar.");
+  }
+
   const edge = await (prisma as any).orgEdge.update({
     where: { id: input.edgeId },
     data: {
       type: safeEdgeType(input.type),
       label: textOrNull(input.label),
+    },
+  });
+
+  // Una pareja de cajas debe tener una sola relación vigente. Esto limpia
+  // conexiones antiguas que podían quedar superpuestas al cambiar el tipo.
+  await (prisma as any).orgEdge.deleteMany({
+    where: {
+      orgChartId: currentEdge.orgChartId,
+      sourceId: currentEdge.sourceId,
+      targetId: currentEdge.targetId,
+      id: { not: currentEdge.id },
     },
   });
 
