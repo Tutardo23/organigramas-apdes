@@ -23,7 +23,6 @@ import "@xyflow/react/dist/style.css";
 import {
   CheckCircle2,
   CircleAlert,
-  GitBranch,
   HelpCircle,
   Layers3,
   Link2,
@@ -42,6 +41,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
+  applyInstitutionalTemplateAction,
   createEdgeAction,
   createNodeAction,
   createOrUpdateNodeMemberAction,
@@ -56,6 +56,10 @@ import {
   updateOrgChartStatusAction,
   updateNodesVisualDefaultsAction,
 } from "../../app/organigramas/[schoolSlug]/editar/actions";
+import {
+  institutionalTemplateNodes,
+  isCollectiveGovernanceNode,
+} from "../../lib/org-chart-template";
 import {
   OrgNodeCard,
   areaLabels,
@@ -564,18 +568,26 @@ export function OrgChartEditor({
   const initializedNodeIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    const guideSeen = window.localStorage.getItem("apdes-org-editor-guide-seen");
-    if (!guideSeen) setShowGuide(true);
+    const timeoutId = window.setTimeout(() => {
+      const guideSeen = window.localStorage.getItem(
+        "apdes-org-editor-guide-v2-seen",
+      );
+      if (!guideSeen) setShowGuide(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   function closeGuide() {
-    window.localStorage.setItem("apdes-org-editor-guide-seen", "true");
+    window.localStorage.setItem("apdes-org-editor-guide-v2-seen", "true");
     setShowGuide(false);
   }
 
   const selectedNode = useMemo(
     () => nodes.find((node) => node.id === selectedNodeId) ?? null,
     [nodes, selectedNodeId],
+  );
+  const selectedIsCollective = Boolean(
+    selectedNode && isCollectiveGovernanceNode(selectedNode.data),
   );
   const selectedEdge = useMemo(
     () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
@@ -837,6 +849,33 @@ export function OrgChartEditor({
     });
   }
 
+  function handleApplyInstitutionalTemplate() {
+    startTransition(async () => {
+      try {
+        const result = await applyInstitutionalTemplateAction({
+          orgChartId,
+          schoolSlug,
+        });
+        const created = result.createdNodes as EditorNodeData[];
+
+        if (created.length === 0) {
+          showMessage("La base institucional ya está completa");
+          return;
+        }
+
+        setNodes((current) => [
+          ...current,
+          ...created.map((node) => toFlowNode(node)),
+        ]);
+        showMessage(
+          `${created.length} casilleros institucionales agregados`,
+        );
+      } catch {
+        showMessage("No se pudo cargar la base institucional");
+      }
+    });
+  }
+
   function handleDeleteNode() {
     if (!selectedNode) return;
     const nodeId = selectedNode.id;
@@ -868,11 +907,11 @@ export function OrgChartEditor({
           weeklyHours: draft.weeklyHours,
           color: draft.color,
           icon: draft.icon,
-          personId: draft.personId,
-          personFirstName: draft.personFirstName,
-          personLastName: draft.personLastName,
-          personEmail: draft.personEmail,
-          personPhone: draft.personPhone,
+          personId: selectedIsCollective ? "__new__" : draft.personId,
+          personFirstName: selectedIsCollective ? "" : draft.personFirstName,
+          personLastName: selectedIsCollective ? "" : draft.personLastName,
+          personEmail: selectedIsCollective ? "" : draft.personEmail,
+          personPhone: selectedIsCollective ? "" : draft.personPhone,
         });
         const updatedNode = result.node as EditorNodeData;
         updateNodeInState(updatedNode);
@@ -893,6 +932,9 @@ export function OrgChartEditor({
 
   function handleSaveMember() {
     if (!selectedNode) return;
+    if (selectedIsCollective && memberDraft.personId === "__new__") {
+      return showMessage("Elegí una persona ya cargada en su área");
+    }
     startTransition(async () => {
       const result = await createOrUpdateNodeMemberAction({
         schoolSlug,
@@ -1049,6 +1091,28 @@ export function OrgChartEditor({
               <HelpCircle className="h-4 w-4" />
               Cómo leer y editar
             </button>
+          </div>
+
+          <div data-guide="template" className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
+            <div className="flex items-center gap-2 text-sm font-black text-blue-950">
+              <Layers3 className="h-4 w-4 text-blue-700" />
+              Base institucional APDES
+            </div>
+            <p className="mt-2 text-xs font-semibold leading-relaxed text-blue-900/70">
+              Agrega Consejo de Dirección y {institutionalTemplateNodes.length - 1} funciones con sus descripciones ya preparadas. Solo suma las que falten y no modifica lo cargado.
+            </p>
+            <button
+              type="button"
+              onClick={handleApplyInstitutionalTemplate}
+              disabled={isPending}
+              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              Cargar casilleros que faltan
+            </button>
+            <p className="mt-2 text-[0.68rem] font-bold leading-relaxed text-blue-800/70">
+              Después podés editar, integrar o eliminar cualquier función según la realidad del colegio.
+            </p>
           </div>
 
           <div data-guide="create" className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
@@ -1446,6 +1510,16 @@ export function OrgChartEditor({
                 </div>
               </div>
 
+              {selectedIsCollective ? (
+                <div className="rounded-3xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-black text-amber-950">
+                    <UsersRound className="h-4 w-4" /> Consejo de Dirección
+                  </div>
+                  <p className="mt-2 text-xs font-semibold leading-relaxed text-amber-900/80">
+                    No cargues una persona como responsable principal. Más abajo elegí como integrantes a las mismas personas que ya aparecen en sus áreas funcionales. Así no se repiten nombres en las cajas y la vista normal puede resaltarlas.
+                  </p>
+                </div>
+              ) : (
               <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4">
                 <div className="mb-1 flex items-center gap-2 text-sm font-black text-blue-900">
                   <UserRound className="h-4 w-4" /> Responsable principal
@@ -1533,6 +1607,7 @@ export function OrgChartEditor({
                   placeholder="Teléfono"
                 />
               </div>
+              )}
 
               <button
                 type="button"
@@ -1545,8 +1620,7 @@ export function OrgChartEditor({
               <div className="rounded-3xl border border-slate-100 bg-white p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 text-sm font-black text-slate-900">
-                    <UsersRound className="h-4 w-4 text-blue-700" /> Personas
-                    del nodo
+                    <UsersRound className="h-4 w-4 text-blue-700" /> {selectedIsCollective ? "Integrantes del Consejo" : "Personas del nodo"}
                   </div>
                   <button
                     type="button"
@@ -1558,9 +1632,9 @@ export function OrgChartEditor({
                 </div>
 
                 <p className="mb-3 text-xs font-semibold leading-relaxed text-slate-500">
-                  Acá van las personas que participan en esta área. El rol puede
-                  ser responsable, equipo, apoyo o externo; esto después
-                  alimenta el tablero de talento.
+                  {selectedIsCollective
+                    ? "Elegí personas ya cargadas en sus áreas. No hace falta volver a escribir sus datos: al tocar el Consejo se resaltarán sus funciones."
+                    : "Acá van las personas que participan en esta área. El rol puede ser responsable, equipo, apoyo o externo; esto después alimenta el tablero de talento."}
                 </p>
                 <div className="space-y-2">
                   {selectedNode.data.members.map((member) => (
@@ -1609,7 +1683,7 @@ export function OrgChartEditor({
                 <div className="mt-4 space-y-2 rounded-2xl bg-slate-50 p-3">
                   <div className="flex items-center gap-2 text-sm font-black text-slate-900">
                     <UserPlus className="h-4 w-4 text-blue-700" />{" "}
-                    Agregar/editar persona
+                    {selectedIsCollective ? "Agregar integrante existente" : "Agregar/editar persona"}
                   </div>
                   <select
                     className={inputClass()}
@@ -1628,7 +1702,11 @@ export function OrgChartEditor({
                       }));
                     }}
                   >
-                    <option value="__new__">Crear nueva persona</option>
+                    <option value="__new__">
+                      {selectedIsCollective
+                        ? "Elegí una persona cargada"
+                        : "Crear nueva persona"}
+                    </option>
                     {people.map((person) => (
                       <option key={person.id} value={person.id}>
                         {`${person.firstName} ${person.lastName}`.trim()}
@@ -1914,29 +1992,34 @@ export function OrgChartEditor({
 function EditorGuide({ onClose }: { onClose: () => void }) {
   const items = [
     {
-      target: "panel",
-      title: "Tu panel de trabajo",
-      body: "Desde acá construís el organigrama paso a paso. La guía queda siempre disponible desde el botón Cómo leer y editar.",
+      target: "template",
+      title: "Empezá desde una base",
+      body: "Cargá las funciones institucionales sugeridas sin completar cada casillero desde cero. Solo se agregan las que falten y todo queda editable.",
     },
     {
       target: "create",
-      title: "Agregar un área o función",
-      body: "Elegí el nombre, el área y su identidad visual. Después vas a poder asignar responsables, equipo y horas.",
-    },
-    {
-      target: "relation",
-      title: "Mostrar cómo trabajan juntos",
-      body: "Creá dependencias jerárquicas o vínculos de colaboración, acompañamiento, decisión e información.",
+      title: "Agregá funciones propias",
+      body: "Si el colegio necesita otra función, creala acá. Elegí nombre, área, color e icono; después completás personas y responsabilidades.",
     },
     {
       target: "canvas",
-      title: "Organizar visualmente",
-      body: "Tocá un elemento para editarlo, arrastralo para moverlo y usá Ordenar automático cuando necesites recuperar una vista limpia.",
+      title: "Ordená el organigrama",
+      body: "Tocá una caja para editarla y arrastrala para moverla. El Consejo de Dirección representa un órgano colegiado, no una persona de la que necesariamente dependa todo.",
     },
     {
       target: "details",
-      title: "Completar y revisar",
-      body: "Al seleccionar un área aparece su detalle. Sin selección, este panel muestra el checklist institucional antes de enviar o publicar.",
+      title: "Asigná personas sin repetirlas",
+      body: "Cargá cada persona en su área funcional. En Consejo de Dirección elegí esas mismas personas desde la lista: en la vista normal, tocar el Consejo resaltará sus áreas.",
+    },
+    {
+      target: "relation",
+      title: "Diferenciá los vínculos",
+      body: "Usá jerárquica solo para dependencia directa. Para trabajo compartido elegí colaboración, acompañamiento, decisión, información o transversal.",
+    },
+    {
+      target: "details",
+      title: "Revisá antes de publicar",
+      body: "Sin una caja seleccionada, el panel derecho muestra el checklist institucional. La guía siempre vuelve a abrirse desde Cómo leer y editar.",
     },
   ];
 
@@ -1945,20 +2028,42 @@ function EditorGuide({ onClose }: { onClose: () => void }) {
   const current = items[step];
 
   useEffect(() => {
+    const previousOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+
     const update = () => {
       const element = document.querySelector<HTMLElement>(`[data-guide="${current.target}"]`);
       if (!element) return setRect(null);
-      const nextRect = element.getBoundingClientRect();
-      if (nextRect.top < 16 || nextRect.bottom > window.innerHeight - 16) {
-        window.scrollTo({ top: Math.max(0, window.scrollY + nextRect.top - 80), behavior: "smooth" });
-        window.setTimeout(() => setRect(element.getBoundingClientRect()), 350);
-      } else {
-        setRect(nextRect);
+      let nextRect = element.getBoundingClientRect();
+      const scrollContainer = element.closest<HTMLElement>("aside");
+
+      if (scrollContainer) {
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const outsideContainer =
+          nextRect.top < containerRect.top + 12 ||
+          nextRect.bottom > containerRect.bottom - 12;
+        if (outsideContainer) {
+          scrollContainer.scrollTop +=
+            nextRect.top - containerRect.top - containerRect.height * 0.18;
+          nextRect = element.getBoundingClientRect();
+        }
       }
+
+      const visible =
+        nextRect.bottom > 8 &&
+        nextRect.top < window.innerHeight - 8 &&
+        nextRect.right > 8 &&
+        nextRect.left < window.innerWidth - 8;
+      setRect(visible ? nextRect : null);
     };
     update();
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      document.documentElement.style.overflow = previousOverflow;
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
   }, [current.target]);
 
   return (
@@ -1978,7 +2083,7 @@ function EditorGuide({ onClose }: { onClose: () => void }) {
           <button type="button" onClick={onClose} className="rounded-full border border-slate-200 p-2 text-slate-500 hover:bg-slate-50" aria-label="Cerrar guía"><X className="h-4 w-4" /></button>
         </div>
         <div className="mt-5 flex items-center justify-between gap-3">
-          <button type="button" onClick={onClose} className="text-sm font-black text-slate-500 hover:text-slate-900">Omitir guía</button>
+          <button type="button" onClick={onClose} className="text-sm font-black text-slate-500 hover:text-slate-900">Cerrar guía</button>
           <div className="flex gap-2">
             {step > 0 ? <button type="button" onClick={() => setStep((value) => value - 1)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-700">Anterior</button> : null}
             <button type="button" onClick={() => step === items.length - 1 ? onClose() : setStep((value) => value + 1)} className="rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white hover:bg-blue-800">{step === items.length - 1 ? "Finalizar" : "Siguiente"}</button>

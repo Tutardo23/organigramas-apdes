@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "../../../../lib/prisma";
+import {
+  institutionalTemplateNodes,
+  normalizeTemplateTitle,
+} from "../../../../lib/org-chart-template";
 
 function textOrNull(value: unknown) {
   if (typeof value !== "string") return null;
@@ -193,6 +197,73 @@ export async function createNodeAction(input: {
 
   revalidateOrganigrama(input.schoolSlug);
   return normalizeNode(node);
+}
+
+export async function applyInstitutionalTemplateAction(input: {
+  orgChartId: string;
+  schoolSlug: string;
+}) {
+  const chart = await (prisma as any).orgChart.findUnique({
+    where: { id: input.orgChartId },
+    include: {
+      nodes: {
+        include: {
+          person: true,
+          members: {
+            include: { person: true },
+            orderBy: [{ role: "asc" }, { order: "asc" }],
+          },
+        },
+      },
+    },
+  });
+
+  if (!chart) throw new Error("No se encontró el organigrama.");
+
+  const existingTitles = new Set(
+    chart.nodes.map((node: any) => normalizeTemplateTitle(node.title)),
+  );
+  const missing = institutionalTemplateNodes.filter(
+    (template) => !existingTitles.has(normalizeTemplateTitle(template.title)),
+  );
+
+  if (missing.length === 0) {
+    return { createdNodes: [], skippedCount: institutionalTemplateNodes.length };
+  }
+
+  const firstOrder = chart.nodes.length + 1;
+  const createdNodes = await prisma.$transaction(
+    missing.map((template, index) =>
+      (prisma as any).orgNode.create({
+        data: {
+          orgChartId: input.orgChartId,
+          title: template.title,
+          area: safeArea(template.area),
+          formalRole: template.formalRole,
+          realFunction: template.realFunction,
+          description: template.description,
+          color: template.color,
+          icon: template.icon,
+          positionX: template.positionX,
+          positionY: template.positionY,
+          order: firstOrder + index,
+        },
+        include: {
+          person: true,
+          members: {
+            include: { person: true },
+            orderBy: [{ role: "asc" }, { order: "asc" }],
+          },
+        },
+      }),
+    ),
+  );
+
+  revalidateOrganigrama(input.schoolSlug);
+  return {
+    createdNodes: createdNodes.map(normalizeNode),
+    skippedCount: institutionalTemplateNodes.length - missing.length,
+  };
 }
 
 export async function updateNodesVisualDefaultsAction(input: {
@@ -496,9 +567,6 @@ export async function createOrUpdateNodeMemberAction(input: {
 
   let personId = input.personId || null;
   if (personId === "__new__") personId = null;
-  const nextMemberOrder = input.memberId
-    ? undefined
-    : await getNextMemberOrder(input.orgNodeId);
 
   if (personId) {
     await (prisma as any).person.update({
@@ -531,13 +599,20 @@ export async function createOrUpdateNodeMemberAction(input: {
     notes: textOrNull(input.notes),
   };
 
-  if (nextMemberOrder !== undefined) {
-    data.order = nextMemberOrder;
-  }
+  const existingMembership =
+    !input.memberId && personId
+      ? await (prisma as any).orgNodeMember.findFirst({
+          where: { orgNodeId: input.orgNodeId, personId },
+        })
+      : null;
 
-  const member = input.memberId
+  const membershipId = input.memberId || existingMembership?.id || null;
+  if (!membershipId) {
+    data.order = await getNextMemberOrder(input.orgNodeId);
+  }
+  const member = membershipId
     ? await (prisma as any).orgNodeMember.update({
-        where: { id: input.memberId },
+        where: { id: membershipId },
         data,
         include: { person: true },
       })

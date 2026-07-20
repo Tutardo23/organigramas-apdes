@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "../../lib/prisma";
+import { institutionalTemplateNodes } from "../../lib/org-chart-template";
 
 function slugify(value: string) {
   return value
@@ -19,6 +20,7 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
   const province = String(formData.get("province") ?? "").trim();
   const yearValue = Number(formData.get("year") ?? new Date().getFullYear());
   const year = Number.isFinite(yearValue) ? yearValue : new Date().getFullYear();
+  const startMode = String(formData.get("startMode") ?? "template");
 
   if (!name) {
     throw new Error("El nombre del colegio es obligatorio.");
@@ -56,6 +58,23 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
         title: `Organigrama Institucional ${school.name} ${year}`,
         year,
         status: "DRAFT",
+        nodes:
+          startMode === "empty"
+            ? undefined
+            : {
+                create: institutionalTemplateNodes.map((node, index) => ({
+                  title: node.title,
+                  area: node.area,
+                  formalRole: node.formalRole,
+                  realFunction: node.realFunction,
+                  description: node.description,
+                  color: node.color,
+                  icon: node.icon,
+                  positionX: node.positionX,
+                  positionY: node.positionY,
+                  order: index + 1,
+                })),
+              },
       },
     });
   }

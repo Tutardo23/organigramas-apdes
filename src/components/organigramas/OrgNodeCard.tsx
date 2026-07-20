@@ -25,6 +25,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
+import { isCollectiveGovernanceNode } from "../../lib/org-chart-template";
 
 export type PersonPreview = {
   id: string;
@@ -292,6 +293,7 @@ function formatPersonName(person?: PersonPreview | null) {
 }
 
 function getResponsible(data: OrgNodeData) {
+  if (isCollectiveGovernanceNode(data)) return null;
   const fromMembers = data.members?.find(
     (member) => member.role === "RESPONSABLE",
   )?.person;
@@ -310,23 +312,37 @@ export function OrgNodeCard({
   selected,
   editor = false,
   compact = false,
+  emphasized = false,
+  dimmed = false,
 }: {
   data: OrgNodeData;
   selected?: boolean;
   editor?: boolean;
   compact?: boolean;
+  emphasized?: boolean;
+  dimmed?: boolean;
 }) {
   const color = getNodeColor(data.color, data.area);
   const Icon = getIcon(data.icon, data.area);
   const responsible = getResponsible(data);
   const responsibleName = formatPersonName(responsible);
-  const memberCount = data.members?.length ?? (data.person ? 1 : 0);
+  const memberCount = new Set([
+    ...(data.person?.id ? [data.person.id] : []),
+    ...(data.members ?? []).map((member) => member.person.id),
+  ]).size;
   const totalHours = getTotalHours(data);
+  const collective = isCollectiveGovernanceNode(data);
 
   return (
     <div
-      className={`group relative w-[235px] rounded-[1.5rem] p-[1px] transition-shadow duration-200 ${
-        selected ? "shadow-2xl ring-4 ring-blue-100" : "shadow-md hover:shadow-xl"
+      className={`group relative w-[235px] rounded-[1.5rem] p-[1px] transition duration-200 ${
+        dimmed ? "opacity-30 saturate-50" : "opacity-100"
+      } ${
+        selected
+          ? "shadow-2xl ring-4 ring-blue-100"
+          : emphasized
+            ? "shadow-xl ring-4 ring-amber-200"
+            : "shadow-md hover:shadow-xl"
       }`}
       style={{
         background: `linear-gradient(135deg, ${color}, rgba(226,232,240,0.92))`,
@@ -351,7 +367,12 @@ export function OrgNodeCard({
           </div>
         </div>
 
-        {responsibleName ? (
+        {collective ? (
+          <div className="mt-2 flex items-center gap-2 rounded-xl bg-blue-50 px-2.5 py-1.5 text-[0.68rem] font-black text-blue-700">
+            <UsersRound className="h-4 w-4" />
+            <span>Órgano colegiado · Tocá para ver integrantes</span>
+          </div>
+        ) : responsibleName ? (
           <div className="mt-2 flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-1.5 text-[0.72rem] font-black text-slate-700">
             <UserRound className="h-4 w-4" style={{ color }} />
             <span className="truncate">{responsibleName}</span>
@@ -373,7 +394,7 @@ export function OrgNodeCard({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
           <span className="inline-flex items-center gap-1.5 text-[0.68rem] font-black uppercase tracking-[0.13em] text-slate-400">
             <UsersRound className="h-3.5 w-3.5" />
-            {memberCount} pers.
+            {memberCount} {collective ? "integrantes" : "pers."}
           </span>
 
           {totalHours !== null && totalHours !== undefined ? (

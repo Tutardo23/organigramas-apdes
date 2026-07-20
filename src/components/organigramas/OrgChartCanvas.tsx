@@ -18,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 import Link from "next/link";
 import { ArrowRight, FileText, GitBranch, Info, Layers3, Mail, Phone, UserRound, UsersRound, X } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
+import { isCollectiveGovernanceNode } from "../../lib/org-chart-template";
 import {
   OrgNodeCard,
   areaLabels,
@@ -34,11 +35,23 @@ type Props = {
   schoolSlug: string;
 };
 
-function ViewerNode({ data, selected }: NodeProps<Node<OrgNodeData>>) {
+type ViewerNodeData = OrgNodeData & {
+  viewerState?: {
+    emphasized: boolean;
+    dimmed: boolean;
+  };
+};
+
+function ViewerNode({ data, selected }: NodeProps<Node<ViewerNodeData>>) {
   return (
     <>
       <Handle type="target" position={Position.Top} className="opacity-0" />
-      <OrgNodeCard data={data} selected={selected} />
+      <OrgNodeCard
+        data={data}
+        selected={selected}
+        emphasized={data.viewerState?.emphasized}
+        dimmed={data.viewerState?.dimmed}
+      />
       <Handle type="source" position={Position.Bottom} className="opacity-0" />
     </>
   );
@@ -83,13 +96,50 @@ function buildEdge(edge: OrgEdgeData): Edge {
 export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const collectiveSelection = Boolean(
+    selectedNode && isCollectiveGovernanceNode(selectedNode),
+  );
 
-  const flowNodes: Node<OrgNodeData>[] = useMemo(() => {
+  const linkedNodeIds = useMemo(() => {
+    if (!selectedNode || !isCollectiveGovernanceNode(selectedNode)) {
+      return new Set<string>();
+    }
+
+    const councilPersonIds = new Set([
+      ...(selectedNode.person?.id ? [selectedNode.person.id] : []),
+      ...(selectedNode.members ?? []).map((member) => member.person.id),
+    ]);
+
+    return new Set(
+      nodes
+        .filter((node) => {
+          if (node.id === selectedNode.id) return false;
+          const nodePersonIds = [
+            ...(node.person?.id ? [node.person.id] : []),
+            ...(node.members ?? []).map((member) => member.person.id),
+          ];
+          return nodePersonIds.some((personId) => councilPersonIds.has(personId));
+        })
+        .map((node) => node.id),
+    );
+  }, [nodes, selectedNode]);
+
+  const flowNodes: Node<ViewerNodeData>[] = useMemo(() => {
     return nodes.map((node) => ({
       id: node.id,
       type: "orgNode",
       position: { x: node.positionX, y: node.positionY },
-      data: node,
+      data: {
+        ...node,
+        viewerState: {
+          emphasized: collectiveSelection && linkedNodeIds.has(node.id),
+          dimmed:
+            collectiveSelection &&
+            linkedNodeIds.size > 0 &&
+            node.id !== selectedNodeId &&
+            !linkedNodeIds.has(node.id),
+        },
+      },
       // La vista es de solo lectura y no usa onNodesChange. Sin medidas
       // iniciales, React Flow muestra las tarjetas pero no crea sus figuras
       // dentro del MiniMap.
@@ -98,11 +148,16 @@ export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
       draggable: false,
       selectable: true,
     }));
-  }, [nodes]);
+  }, [collectiveSelection, linkedNodeIds, nodes, selectedNodeId]);
 
   const flowEdges: Edge[] = useMemo(() => edges.map(buildEdge), [edges]);
 
-  const totalPeople = selectedNode?.members?.length ?? (selectedNode?.person ? 1 : 0);
+  const totalPeople = selectedNode
+    ? new Set([
+        ...(selectedNode.person?.id ? [selectedNode.person.id] : []),
+        ...(selectedNode.members ?? []).map((member) => member.person.id),
+      ]).size
+    : 0;
   const totalHours = selectedNode?.members?.reduce((acc, member) => acc + (member.weeklyHours ?? 0), 0) || selectedNode?.weeklyHours || null;
 
   return (
@@ -170,6 +225,19 @@ export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
               {totalHours !== null ? <InfoPill icon={<FileText className="h-4 w-4" />} label={`${totalHours} hs.`} /> : null}
             </div>
 
+            {collectiveSelection ? (
+              <div className="mt-5 rounded-[1.4rem] border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                <div className="flex items-center gap-2 text-sm font-black">
+                  <UsersRound className="h-4 w-4" /> Gobierno colegiado
+                </div>
+                <p className="mt-2 text-sm font-semibold leading-relaxed">
+                  {linkedNodeIds.size > 0
+                    ? `Se resaltan ${linkedNodeIds.size} áreas donde cumplen su función los integrantes del Consejo.`
+                    : "Agregá los integrantes del Consejo usando personas ya cargadas en sus áreas para verlas resaltadas acá."}
+                </p>
+              </div>
+            ) : null}
+
             {selectedNode.person ? (
               <div className="mt-5 rounded-[1.4rem] border border-blue-100 bg-blue-50 p-4">
                 <div className="flex items-center gap-2 text-sm font-black text-blue-900"><UserRound className="h-4 w-4" /> Responsable principal</div>
@@ -181,7 +249,7 @@ export function OrgChartCanvas({ nodes, edges, schoolSlug }: Props) {
 
             {selectedNode.members && selectedNode.members.length > 0 ? (
               <div className="mt-5 rounded-[1.4rem] border border-slate-100 bg-slate-50 p-4">
-                <div className="flex items-center gap-2 text-sm font-black text-slate-900"><UsersRound className="h-4 w-4 text-blue-700" /> Equipo del nodo</div>
+                <div className="flex items-center gap-2 text-sm font-black text-slate-900"><UsersRound className="h-4 w-4 text-blue-700" /> {collectiveSelection ? "Integrantes del Consejo" : "Equipo del nodo"}</div>
                 <div className="mt-3 space-y-2">
                   {selectedNode.members.map((member) => (
                     <div key={member.id} className="rounded-2xl bg-white p-3 shadow-sm">

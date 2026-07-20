@@ -80,7 +80,7 @@ export default async function OrganigramasPage() {
                   Agregar colegio
                 </h2>
                 <p className="text-sm font-medium text-slate-500">
-                  Inicia una estructura institucional vacía.
+                  Empezá con una base institucional o desde cero.
                 </p>
               </div>
             </div>
@@ -110,6 +110,37 @@ export default async function OrganigramasPage() {
                 defaultValue={new Date().getFullYear()}
                 className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
               />
+              <div className="rounded-2xl border border-blue-100 bg-blue-50 p-3">
+                <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700">
+                  Cómo empezar
+                </p>
+                <label className="mt-2 flex cursor-pointer items-start gap-3 rounded-xl bg-white p-3 shadow-sm">
+                  <input
+                    type="radio"
+                    name="startMode"
+                    value="template"
+                    defaultChecked
+                    className="mt-1 h-4 w-4 accent-blue-700"
+                  />
+                  <span>
+                    <span className="block text-sm font-black text-slate-900">
+                      Usar base institucional APDES
+                    </span>
+                    <span className="mt-1 block text-xs font-semibold leading-relaxed text-slate-500">
+                      Incluye Consejo de Dirección, áreas y funciones sugeridas. Todo queda editable.
+                    </span>
+                  </span>
+                </label>
+                <label className="mt-2 flex cursor-pointer items-center gap-3 px-3 py-2 text-sm font-bold text-slate-600">
+                  <input
+                    type="radio"
+                    name="startMode"
+                    value="empty"
+                    className="h-4 w-4 accent-blue-700"
+                  />
+                  Empezar con un organigrama vacío
+                </label>
+              </div>
               <button
                 type="submit"
                 className="flex w-full items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-sm font-black text-white shadow-sm transition hover:bg-blue-800"
