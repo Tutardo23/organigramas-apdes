@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { isElBuenAyreNewProposal } from "../../lib/org-chart-design";
 import {
   applyInstitutionalTemplateAction,
   createEdgeAction,
@@ -74,6 +75,7 @@ import {
   type OrgNodeMemberPreview,
   type PersonPreview,
 } from "./OrgNodeCard";
+import { InstitutionalOrgChartEditor } from "./InstitutionalOrgChartEditor";
 
 type EditorNodeData = OrgNodeData & {
   person: PersonPreview | null;
@@ -100,6 +102,7 @@ type Props = {
   schoolSlug: string;
   schoolName: string;
   orgChartId: string;
+  orgChartTitle: string;
   orgChartStatus: string;
   orgChartVersion: number;
   initialNodes: EditorNodeData[];
@@ -155,6 +158,8 @@ type EdgeEditDraft = {
   type: string;
   label: string;
 };
+
+type RelationView = "clean" | "all";
 
 const areaOptions = Object.keys(areaLabels);
 const edgeTypeOptions = Object.keys(edgeLabels);
@@ -240,7 +245,10 @@ function toFlowNode(node: EditorNodeData): Node<EditorNodeData> {
   };
 }
 
-function toFlowEdge(edge: EditorEdgeData): Edge {
+function toFlowEdge(
+  edge: EditorEdgeData,
+  institutionalDesign = false,
+): Edge {
   const isMain = edge.type === "JERARQUICA";
   const stroke = edgeColors[edge.type] ?? "#64748b";
   const normalizedLabel = edge.label?.trim() || null;
@@ -256,7 +264,9 @@ function toFlowEdge(edge: EditorEdgeData): Edge {
     target: edge.targetId,
     label: rawLabel || (!isMain ? edgeLabels[edge.type] : undefined),
     type: "smoothstep",
-    animated: !isMain,
+    animated: institutionalDesign ? false : !isMain,
+    selectable: true,
+    interactionWidth: 36,
     markerEnd: { type: MarkerType.ArrowClosed, color: stroke },
     style: {
       strokeWidth: isMain ? 2.8 : 2.2,
@@ -528,10 +538,25 @@ function ColorPicker({
   );
 }
 
-export function OrgChartEditor({
+export function OrgChartEditor(props: Props) {
+  const useInstitutionalDesign = isElBuenAyreNewProposal(
+    props.schoolSlug,
+    props.initialNodes,
+    props.orgChartTitle,
+  );
+
+  if (useInstitutionalDesign) {
+    return <InstitutionalOrgChartEditor {...props} />;
+  }
+
+  return <LegacyOrgChartEditor {...props} />;
+}
+
+function LegacyOrgChartEditor({
   schoolSlug,
   schoolName,
   orgChartId,
+  orgChartTitle,
   orgChartStatus,
   orgChartVersion,
   initialNodes,
@@ -539,6 +564,11 @@ export function OrgChartEditor({
   initialPeople,
   initialReviewNotes,
 }: Props) {
+  const useInstitutionalDesign = isElBuenAyreNewProposal(
+    schoolSlug,
+    initialNodes,
+    orgChartTitle,
+  );
   const [isPending, startTransition] = useTransition();
   const [status, setStatus] = useState(orgChartStatus);
   const [version, setVersion] = useState(orgChartVersion);
@@ -547,7 +577,7 @@ export function OrgChartEditor({
     initialNodes.map(toFlowNode),
   );
   const [edges, setEdges] = useState<Edge[]>(() =>
-    initialEdges.map(toFlowEdge),
+    initialEdges.map((edge) => toFlowEdge(edge, useInstitutionalDesign)),
   );
   const [reviewNotes, setReviewNotes] =
     useState<ReviewNoteData[]>(initialReviewNotes);
@@ -562,6 +592,7 @@ export function OrgChartEditor({
     useState<RelationDraft>(defaultRelation);
   const [edgeEditDraft, setEdgeEditDraft] =
     useState<EdgeEditDraft>(defaultEdgeEditDraft);
+  const [relationView, setRelationView] = useState<RelationView>("clean");
   const [reviewDraft, setReviewDraft] = useState({ title: "", body: "" });
   const [message, setMessage] = useState<string | null>(null);
   const [showGuide, setShowGuide] = useState(false);
@@ -593,6 +624,44 @@ export function OrgChartEditor({
     () => edges.find((edge) => edge.id === selectedEdgeId) ?? null,
     [edges, selectedEdgeId],
   );
+  const nodeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes],
+  );
+  const selectedNodeRelations = useMemo(
+    () =>
+      selectedNodeId
+        ? edges.filter(
+            (edge) =>
+              edge.source === selectedNodeId ||
+              edge.target === selectedNodeId,
+          )
+        : [],
+    [edges, selectedNodeId],
+  );
+  const displayedEdges = useMemo(
+    () => {
+      if (!useInstitutionalDesign) return edges;
+
+      return edges.filter((edge) => {
+        if (edge.data?.edgeType === "JERARQUICA") return true;
+        if (relationView === "all") return true;
+        if (edge.id === selectedEdgeId) return true;
+        return Boolean(
+          selectedNodeId &&
+            (edge.source === selectedNodeId ||
+              edge.target === selectedNodeId),
+        );
+      });
+    },
+    [
+      edges,
+      relationView,
+      selectedEdgeId,
+      selectedNodeId,
+      useInstitutionalDesign,
+    ],
+  );
   const reviewChecks = useMemo(
     () => getReviewChecks(nodes, edges),
     [nodes, edges],
@@ -600,30 +669,44 @@ export function OrgChartEditor({
   const readyCount = reviewChecks.filter((check) => check.ok).length;
 
   useEffect(() => {
-    if (!selectedNodeId) {
-      initializedNodeIdRef.current = null;
-      setDraft(null);
-      return;
-    }
+    const timeoutId = window.setTimeout(() => {
+      if (!selectedNodeId) {
+        initializedNodeIdRef.current = null;
+        setDraft(null);
+        return;
+      }
 
-    if (initializedNodeIdRef.current === selectedNodeId) return;
+      if (initializedNodeIdRef.current === selectedNodeId) return;
 
-    const nodeToEdit = nodes.find((node) => node.id === selectedNodeId);
-    if (nodeToEdit) {
-      initializedNodeIdRef.current = selectedNodeId;
-      setDraft(nodeToDraft(nodeToEdit.data));
-      setRelationDraft((current) => ({
-        ...current,
-        sourceId: nodeToEdit.id,
-        targetId: current.targetId === nodeToEdit.id ? "" : current.targetId,
-      }));
-      setMemberDraft(defaultMemberDraft);
-    }
+      const nodeToEdit = nodes.find((node) => node.id === selectedNodeId);
+      if (nodeToEdit) {
+        initializedNodeIdRef.current = selectedNodeId;
+        setDraft(nodeToDraft(nodeToEdit.data));
+        setRelationDraft((current) => ({
+          ...current,
+          sourceId: nodeToEdit.id,
+          targetId: current.targetId === nodeToEdit.id ? "" : current.targetId,
+        }));
+        setMemberDraft(defaultMemberDraft);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeoutId);
   }, [nodes, selectedNodeId]);
 
   function showMessage(value: string) {
     setMessage(value);
     window.setTimeout(() => setMessage(null), 2600);
+  }
+
+  function selectEdgeForEditing(edge: Edge) {
+    setSelectedEdgeId(edge.id);
+    setSelectedNodeId(null);
+    setEdgeEditDraft({
+      type:
+        (edge.data?.edgeType as string | undefined) ?? "JERARQUICA",
+      label: (edge.data?.rawLabel as string | undefined) ?? "",
+    });
   }
 
   function onNodesChange(changes: NodeChange[]) {
@@ -708,13 +791,16 @@ export function OrgChartEditor({
             type: input.type,
             label: input.label,
           });
-          const updatedFlowEdge = toFlowEdge({
-            id: updated.id,
-            sourceId: updated.sourceId,
-            targetId: updated.targetId,
-            type: updated.type,
-            label: updated.label,
-          });
+          const updatedFlowEdge = toFlowEdge(
+            {
+              id: updated.id,
+              sourceId: updated.sourceId,
+              targetId: updated.targetId,
+              type: updated.type,
+              label: updated.label,
+            },
+            useInstitutionalDesign,
+          );
           setEdges((current) =>
             current.map((edge) =>
               edge.id === updated.id ? updatedFlowEdge : edge,
@@ -737,13 +823,16 @@ export function OrgChartEditor({
     }
 
     const temporaryId = `temp-edge-${Date.now()}`;
-    const optimistic = toFlowEdge({
-      id: temporaryId,
-      sourceId: input.sourceId,
-      targetId: input.targetId,
-      type: input.type,
-      label: input.label || null,
-    });
+    const optimistic = toFlowEdge(
+      {
+        id: temporaryId,
+        sourceId: input.sourceId,
+        targetId: input.targetId,
+        type: input.type,
+        label: input.label || null,
+      },
+      useInstitutionalDesign,
+    );
     setEdges((current) => [...current, optimistic]);
 
     startTransition(async () => {
@@ -759,13 +848,16 @@ export function OrgChartEditor({
         setEdges((current) =>
           current.map((edge) =>
             edge.id === temporaryId
-              ? toFlowEdge({
-                  id: created.id,
-                  sourceId: created.sourceId,
-                  targetId: created.targetId,
-                  type: created.type,
-                  label: created.label,
-                })
+              ? toFlowEdge(
+                  {
+                    id: created.id,
+                    sourceId: created.sourceId,
+                    targetId: created.targetId,
+                    type: created.type,
+                    label: created.label,
+                  },
+                  useInstitutionalDesign,
+                )
               : edge,
           ),
         );
@@ -932,8 +1024,12 @@ export function OrgChartEditor({
 
   function handleSaveMember() {
     if (!selectedNode) return;
-    if (selectedIsCollective && memberDraft.personId === "__new__") {
-      return showMessage("Elegí una persona ya cargada en su área");
+    if (
+      memberDraft.personId === "__new__" &&
+      !memberDraft.firstName.trim() &&
+      !memberDraft.lastName.trim()
+    ) {
+      return showMessage("Escribí al menos el nombre o el apellido");
     }
     startTransition(async () => {
       const result = await createOrUpdateNodeMemberAction({
@@ -984,13 +1080,16 @@ export function OrgChartEditor({
           type: edgeEditDraft.type,
           label: edgeEditDraft.label,
         });
-        const updatedFlowEdge = toFlowEdge({
-          id: updated.id,
-          sourceId: updated.sourceId,
-          targetId: updated.targetId,
-          type: updated.type,
-          label: updated.label,
-        });
+        const updatedFlowEdge = toFlowEdge(
+          {
+            id: updated.id,
+            sourceId: updated.sourceId,
+            targetId: updated.targetId,
+            type: updated.type,
+            label: updated.label,
+          },
+          useInstitutionalDesign,
+        );
         setEdges((current) => {
           const withoutDuplicates = current.filter(
             (edge) =>
@@ -1298,14 +1397,41 @@ export function OrgChartEditor({
           </div>
 
           {message ? (
-            <div className="absolute right-5 top-5 z-20 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">
+            <div className="absolute right-5 top-20 z-20 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700 shadow-sm">
               {message}
+            </div>
+          ) : null}
+
+          {useInstitutionalDesign ? (
+            <div className="absolute right-4 top-4 z-20 flex items-center gap-1 rounded-2xl border border-slate-200 bg-white/95 p-1.5 shadow-sm backdrop-blur">
+              <button
+                type="button"
+                onClick={() => setRelationView("clean")}
+                className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                  relationView === "clean"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                Vista limpia
+              </button>
+              <button
+                type="button"
+                onClick={() => setRelationView("all")}
+                className={`rounded-xl px-3 py-2 text-xs font-black transition ${
+                  relationView === "all"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                }`}
+              >
+                Todos los vínculos
+              </button>
             </div>
           ) : null}
 
           <ReactFlow
             nodes={nodes}
-            edges={edges}
+            edges={displayedEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -1315,17 +1441,7 @@ export function OrgChartEditor({
               setSelectedNodeId(node.id);
               setSelectedEdgeId(null);
             }}
-            onEdgeClick={(_, edge) => {
-              setSelectedEdgeId(edge.id);
-              setSelectedNodeId(null);
-              setEdgeEditDraft({
-                type:
-                  (edge.data?.edgeType as string | undefined) ??
-                  "JERARQUICA",
-                label:
-                  (edge.data?.rawLabel as string | undefined) ?? "",
-              });
-            }}
+            onEdgeClick={(_, edge) => selectEdgeForEditing(edge)}
             onPaneClick={() => {
               setSelectedNodeId(null);
               setSelectedEdgeId(null);
@@ -1375,6 +1491,52 @@ export function OrgChartEditor({
                   lectura de talento.
                 </p>
               </div>
+
+              {useInstitutionalDesign && selectedNodeRelations.length > 0 ? (
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-black text-slate-900">
+                    <Route className="h-4 w-4 text-blue-700" />
+                    Vínculos de esta caja
+                  </div>
+                  <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">
+                    Elegí uno para cambiarlo o eliminarlo. No hace falta
+                    acertarle a la línea en el mapa.
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {selectedNodeRelations.map((edge) => {
+                      const otherNode = nodeById.get(
+                        edge.source === selectedNode.id
+                          ? edge.target
+                          : edge.source,
+                      );
+                      const edgeType =
+                        (edge.data?.edgeType as string | undefined) ??
+                        "JERARQUICA";
+
+                      return (
+                        <button
+                          key={edge.id}
+                          type="button"
+                          onClick={() => selectEdgeForEditing(edge)}
+                          className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-left transition hover:border-blue-300 hover:bg-blue-50"
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-black text-slate-900">
+                              {otherNode?.data.title ?? "Otra caja"}
+                            </span>
+                            <span className="mt-0.5 block text-[0.68rem] font-bold text-slate-500">
+                              {edgeLabels[edgeType] ?? "Relación"}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-[0.68rem] font-black text-blue-700">
+                            Editar
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
 
               <div className="space-y-3">
                 <input
@@ -1516,7 +1678,7 @@ export function OrgChartEditor({
                     <UsersRound className="h-4 w-4" /> Consejo de Dirección
                   </div>
                   <p className="mt-2 text-xs font-semibold leading-relaxed text-amber-900/80">
-                    No cargues una persona como responsable principal. Más abajo elegí como integrantes a las mismas personas que ya aparecen en sus áreas funcionales. Así no se repiten nombres en las cajas y la vista normal puede resaltarlas.
+                    Agregá abajo a quienes integran el Consejo. Podés elegir una persona ya cargada o crearla acá; después quedará disponible para asignarla también a su área funcional. Así el nombre no se repite en la caja del Consejo y la vista normal puede resaltar su función.
                   </p>
                 </div>
               ) : (
@@ -1633,7 +1795,7 @@ export function OrgChartEditor({
 
                 <p className="mb-3 text-xs font-semibold leading-relaxed text-slate-500">
                   {selectedIsCollective
-                    ? "Elegí personas ya cargadas en sus áreas. No hace falta volver a escribir sus datos: al tocar el Consejo se resaltarán sus funciones."
+                    ? "Elegí una persona ya cargada o creala acá. Para que su área se resalte al tocar el Consejo, asigná después esta misma persona a su función dentro del organigrama."
                     : "Acá van las personas que participan en esta área. El rol puede ser responsable, equipo, apoyo o externo; esto después alimenta el tablero de talento."}
                 </p>
                 <div className="space-y-2">
@@ -1683,7 +1845,7 @@ export function OrgChartEditor({
                 <div className="mt-4 space-y-2 rounded-2xl bg-slate-50 p-3">
                   <div className="flex items-center gap-2 text-sm font-black text-slate-900">
                     <UserPlus className="h-4 w-4 text-blue-700" />{" "}
-                    {selectedIsCollective ? "Agregar integrante existente" : "Agregar/editar persona"}
+                    {selectedIsCollective ? "Agregar o editar integrante" : "Agregar/editar persona"}
                   </div>
                   <select
                     className={inputClass()}
@@ -1704,7 +1866,7 @@ export function OrgChartEditor({
                   >
                     <option value="__new__">
                       {selectedIsCollective
-                        ? "Elegí una persona cargada"
+                        ? "Crear una persona nueva"
                         : "Crear nueva persona"}
                     </option>
                     {people.map((person) => (

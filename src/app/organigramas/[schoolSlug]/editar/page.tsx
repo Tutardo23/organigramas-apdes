@@ -7,6 +7,7 @@ import { deleteOrgChartFormAction } from "./actions";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
+  searchParams: Promise<{ organigrama?: string | string[] }>;
 };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -21,8 +22,15 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function EditOrganigramaPage({ params }: PageProps) {
+export default async function EditOrganigramaPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { schoolSlug } = await params;
+  const requestedChartParam = (await searchParams).organigrama;
+  const requestedChartId = Array.isArray(requestedChartParam)
+    ? requestedChartParam[0]
+    : requestedChartParam;
 
   const school = await (prisma as any).school.findUnique({
     where: { slug: schoolSlug },
@@ -32,7 +40,11 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       },
       orgCharts: {
-        orderBy: { year: "desc" },
+        orderBy: [
+          { year: "desc" },
+          { version: "desc" },
+          { createdAt: "desc" },
+        ],
         include: {
           nodes: {
             orderBy: { order: "asc" },
@@ -55,7 +67,9 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
 
   if (!school) notFound();
 
-  const currentChart = school.orgCharts[0];
+  const currentChart =
+    school.orgCharts.find((chart: any) => chart.id === requestedChartId) ??
+    school.orgCharts[0];
   if (!currentChart) notFound();
 
   const initialNodes = currentChart.nodes.map((node: any) => ({
@@ -95,7 +109,7 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
       <section className="mx-auto max-w-[1680px]">
         <div className="mb-5 flex flex-col gap-4 rounded-[1.6rem] border border-slate-200 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
           <div>
-            <Link href={`/organigramas/${school.slug}`} className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
+            <Link href={`/organigramas/${school.slug}?organigrama=${currentChart.id}`} className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
               <ArrowLeft className="h-4 w-4" />
               Volver a la vista del organigrama
             </Link>
@@ -124,7 +138,7 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
             </Link>
 
             <Link
-              href={`/organigramas/${school.slug}`}
+              href={`/organigramas/${school.slug}?organigrama=${currentChart.id}`}
               className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
             >
               <Eye className="h-4 w-4" />
@@ -161,6 +175,7 @@ export default async function EditOrganigramaPage({ params }: PageProps) {
           schoolSlug={school.slug}
           schoolName={school.name}
           orgChartId={currentChart.id}
+          orgChartTitle={currentChart.title}
           orgChartStatus={currentChart.status}
           orgChartVersion={currentChart.version ?? 1}
           initialNodes={initialNodes}

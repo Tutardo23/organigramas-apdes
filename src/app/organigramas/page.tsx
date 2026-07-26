@@ -28,9 +28,11 @@ export default async function OrganigramasPage() {
     },
     include: {
       orgCharts: {
-        orderBy: {
-          year: "desc",
-        },
+        orderBy: [
+          { year: "desc" },
+          { version: "desc" },
+          { createdAt: "desc" },
+        ],
       },
     },
   });
@@ -193,22 +195,38 @@ export default async function OrganigramasPage() {
                   </p>
 
                   {latestChart && (
-                    <p className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-slate-500">
-                      <CalendarDays className="h-4 w-4" />
-                      Año {latestChart.year}
-                    </p>
+                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm font-semibold text-slate-500">
+                      <p className="flex items-center gap-1.5">
+                        <CalendarDays className="h-4 w-4" />
+                        Año {latestChart.year}
+                      </p>
+                      <p>
+                        {school.orgCharts.length}{" "}
+                        {school.orgCharts.length === 1
+                          ? "organigrama"
+                          : "organigramas"}
+                      </p>
+                    </div>
                   )}
                 </div>
 
                 <div className="mt-5 grid grid-cols-[1fr_auto] gap-3">
                   <Link
-                    href={`/organigramas/${school.slug}`}
+                    href={
+                      latestChart
+                        ? `/organigramas/${school.slug}?organigrama=${latestChart.id}`
+                        : `/organigramas/${school.slug}`
+                    }
                     className="inline-flex items-center justify-center gap-2 rounded-2xl bg-blue-700 px-4 py-3 text-center text-sm font-black text-white transition hover:bg-blue-800"
                   >
                     Abrir organigrama <ArrowRight className="h-4 w-4" />
                   </Link>
                   <Link
-                    href={`/organigramas/${school.slug}/editar`}
+                    href={
+                      latestChart
+                        ? `/organigramas/${school.slug}/editar?organigrama=${latestChart.id}`
+                        : `/organigramas/${school.slug}/editar`
+                    }
                     className="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-sm font-black text-slate-600 transition hover:bg-slate-50"
                     aria-label={`Editar organigrama de ${school.name}`}
                   >

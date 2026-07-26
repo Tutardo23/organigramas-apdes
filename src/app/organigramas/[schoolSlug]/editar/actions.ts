@@ -117,15 +117,125 @@ function normalizeNode(node: any) {
   };
 }
 
-async function getNextNodeOrder(orgChartId: string) {
-  const count = await (prisma as any).orgNode.count({ where: { orgChartId } });
-  return count + 1;
+async function resolvePersonForSchool(
+  client: any,
+  input: {
+    schoolId: string;
+    personId?: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    email: string | null;
+    phone: string | null;
+    formalRole?: string | null;
+    realFunction?: string | null;
+    weeklyHours?: number | null;
+  },
+) {
+  if (input.personId) {
+    const existing = await client.person.findFirst({
+      where: {
+        id: input.personId,
+        schoolId: input.schoolId,
+        active: true,
+      },
+    });
+
+    if (!existing) {
+      throw new Error("La persona elegida no pertenece a este colegio.");
+    }
+
+    return client.person.update({
+      where: { id: existing.id },
+      data: {
+        firstName: input.firstName || existing.firstName,
+        lastName: input.lastName ?? existing.lastName,
+        email: input.email ?? existing.email,
+        phone: input.phone ?? existing.phone,
+        formalRole:
+          input.formalRole === undefined
+            ? existing.formalRole
+            : input.formalRole,
+        realFunction:
+          input.realFunction === undefined
+            ? existing.realFunction
+            : input.realFunction,
+        weeklyHours:
+          input.weeklyHours === undefined
+            ? existing.weeklyHours
+            : input.weeklyHours,
+      },
+    });
+  }
+
+  let existing = null;
+
+  if (input.email) {
+    existing = await client.person.findFirst({
+      where: {
+        schoolId: input.schoolId,
+        active: true,
+        email: { equals: input.email, mode: "insensitive" },
+      },
+    });
+  }
+
+  if (!existing && (input.firstName || input.lastName)) {
+    existing = await client.person.findFirst({
+      where: {
+        schoolId: input.schoolId,
+        active: true,
+        firstName: {
+          equals: input.firstName || "Sin nombre",
+          mode: "insensitive",
+        },
+        lastName: {
+          equals: input.lastName || "",
+          mode: "insensitive",
+        },
+      },
+    });
+  }
+
+  if (existing) {
+    return client.person.update({
+      where: { id: existing.id },
+      data: {
+        firstName: input.firstName || existing.firstName,
+        lastName: input.lastName ?? existing.lastName,
+        email: input.email ?? existing.email,
+        phone: input.phone ?? existing.phone,
+        formalRole:
+          input.formalRole === undefined
+            ? existing.formalRole
+            : input.formalRole,
+        realFunction:
+          input.realFunction === undefined
+            ? existing.realFunction
+            : input.realFunction,
+        weeklyHours:
+          input.weeklyHours === undefined
+            ? existing.weeklyHours
+            : input.weeklyHours,
+      },
+    });
+  }
+
+  return client.person.create({
+    data: {
+      schoolId: input.schoolId,
+      firstName: input.firstName || "Sin nombre",
+      lastName: input.lastName || "",
+      email: input.email,
+      phone: input.phone,
+      formalRole: input.formalRole,
+      realFunction: input.realFunction,
+      weeklyHours: input.weeklyHours,
+    },
+  });
 }
 
-async function getNextMemberOrder(orgNodeId: string) {
-  const count = await (prisma as any).orgNodeMember.count({
-    where: { orgNodeId },
-  });
+async function getNextNodeOrder(orgChartId: string) {
+  const count = await (prisma as any).orgNode.count({ where: { orgChartId } });
   return count + 1;
 }
 
@@ -333,72 +443,58 @@ export async function updateNodeAction(input: {
   const phone = textOrNull(input.personPhone);
   const weeklyHours = numberOrNull(input.weeklyHours);
 
-  let finalPersonId: string | null = input.personId || null;
-  let touchedPerson: any = null;
-
-  if (finalPersonId === "__new__") {
-    finalPersonId = null;
-  }
-
-  if (finalPersonId) {
-    touchedPerson = await (prisma as any).person.update({
-      where: { id: finalPersonId },
-      data: {
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-        email,
-        phone,
-        formalRole: textOrNull(input.formalRole),
-        realFunction: textOrNull(input.realFunction),
-        weeklyHours,
-      },
-    });
-  } else if (firstName || lastName || email || phone) {
-    touchedPerson = await (prisma as any).person.create({
-      data: {
-        schoolId: currentNode.orgChart.schoolId,
-        firstName: firstName || "Sin nombre",
-        lastName: lastName || "",
-        email,
-        phone,
-        formalRole: textOrNull(input.formalRole),
-        realFunction: textOrNull(input.realFunction),
-        weeklyHours,
-      },
-    });
-    finalPersonId = touchedPerson.id;
-  }
-
   const finalIcon =
     textOrNull(input.icon) || defaultIconsByArea[area] || "network";
+  const requestedPersonId =
+    input.personId && input.personId !== "__new__" ? input.personId : null;
 
-  const updatedNode = await (prisma as any).orgNode.update({
-    where: { id: input.nodeId },
-    data: {
-      title: input.title.trim() || "Sin título",
-      area,
-      formalRole: textOrNull(input.formalRole),
-      realFunction: textOrNull(input.realFunction),
-      description: textOrNull(input.description),
-      weeklyHours,
-      color: textOrNull(input.color) || defaultColorsByArea[area] || "#2563eb",
-      icon: finalIcon,
-      personId: finalPersonId,
-    },
-    include: {
-      person: true,
-      members: {
-        include: { person: true },
-        orderBy: [{ role: "asc" }, { order: "asc" }],
+  const result = await prisma.$transaction(async (tx) => {
+    const touchedPerson =
+      requestedPersonId || firstName || lastName || email || phone
+        ? await resolvePersonForSchool(tx, {
+            schoolId: currentNode.orgChart.schoolId,
+            personId: requestedPersonId,
+            firstName,
+            lastName,
+            email,
+            phone,
+            formalRole: textOrNull(input.formalRole),
+            realFunction: textOrNull(input.realFunction),
+            weeklyHours,
+          })
+        : null;
+
+    const updatedNode = await (tx as any).orgNode.update({
+      where: { id: input.nodeId },
+      data: {
+        title: input.title.trim() || "Sin título",
+        area,
+        formalRole: textOrNull(input.formalRole),
+        realFunction: textOrNull(input.realFunction),
+        description: textOrNull(input.description),
+        weeklyHours,
+        color:
+          textOrNull(input.color) || defaultColorsByArea[area] || "#2563eb",
+        icon: finalIcon,
+        personId: touchedPerson?.id ?? null,
       },
-    },
+      include: {
+        person: true,
+        members: {
+          include: { person: true },
+          orderBy: [{ role: "asc" }, { order: "asc" }],
+        },
+      },
+    });
+
+    return { updatedNode, touchedPerson };
   });
 
   revalidateOrganigrama(input.schoolSlug);
 
   return {
-    node: normalizeNode(updatedNode),
-    person: touchedPerson,
+    node: normalizeNode(result.updatedNode),
+    person: result.touchedPerson,
   };
 }
 
@@ -565,78 +661,75 @@ export async function createOrUpdateNodeMemberAction(input: {
   const weeklyHours = numberOrNull(input.weeklyHours);
   const role = safeMemberRole(input.role);
 
-  let personId = input.personId || null;
-  if (personId === "__new__") personId = null;
+  const requestedPersonId =
+    input.personId && input.personId !== "__new__" ? input.personId : null;
 
-  if (personId) {
-    await (prisma as any).person.update({
-      where: { id: personId },
-      data: {
-        firstName: firstName || undefined,
-        lastName: lastName || undefined,
-        email,
-        phone,
-      },
+  const result = await prisma.$transaction(async (tx) => {
+    const person = await resolvePersonForSchool(tx, {
+      schoolId: node.orgChart.schoolId,
+      personId: requestedPersonId,
+      firstName,
+      lastName,
+      email,
+      phone,
     });
-  } else {
-    const person = await (prisma as any).person.create({
-      data: {
-        schoolId: node.orgChart.schoolId,
-        firstName: firstName || "Sin nombre",
-        lastName: lastName || "",
-        email,
-        phone,
-      },
-    });
-    personId = person.id;
-  }
 
-  const data: Record<string, unknown> = {
-    personId,
-    role,
-    roleTitle: textOrNull(input.roleTitle),
-    weeklyHours,
-    notes: textOrNull(input.notes),
-  };
+    const data: Record<string, unknown> = {
+      personId: person.id,
+      role,
+      roleTitle: textOrNull(input.roleTitle),
+      weeklyHours,
+      notes: textOrNull(input.notes),
+    };
 
-  const existingMembership =
-    !input.memberId && personId
-      ? await (prisma as any).orgNodeMember.findFirst({
-          where: { orgNodeId: input.orgNodeId, personId },
-        })
-      : null;
+    const existingMembership =
+      !input.memberId
+        ? await (tx as any).orgNodeMember.findFirst({
+            where: { orgNodeId: input.orgNodeId, personId: person.id },
+          })
+        : null;
 
-  const membershipId = input.memberId || existingMembership?.id || null;
-  if (!membershipId) {
-    data.order = await getNextMemberOrder(input.orgNodeId);
-  }
-  const member = membershipId
-    ? await (prisma as any).orgNodeMember.update({
-        where: { id: membershipId },
-        data,
-        include: { person: true },
-      })
-    : await (prisma as any).orgNodeMember.create({
-        data: {
-          orgNodeId: input.orgNodeId,
-          ...data,
-        },
-        include: { person: true },
+    const membershipId = input.memberId || existingMembership?.id || null;
+    if (!membershipId) {
+      const count = await (tx as any).orgNodeMember.count({
+        where: { orgNodeId: input.orgNodeId },
       });
+      data.order = count + 1;
+    }
 
-  const updatedNode = await (prisma as any).orgNode.findUnique({
-    where: { id: input.orgNodeId },
-    include: {
-      person: true,
-      members: {
-        include: { person: true },
-        orderBy: [{ role: "asc" }, { order: "asc" }],
+    const member = membershipId
+      ? await (tx as any).orgNodeMember.update({
+          where: { id: membershipId },
+          data,
+          include: { person: true },
+        })
+      : await (tx as any).orgNodeMember.create({
+          data: {
+            orgNodeId: input.orgNodeId,
+            ...data,
+          },
+          include: { person: true },
+        });
+
+    const updatedNode = await (tx as any).orgNode.findUnique({
+      where: { id: input.orgNodeId },
+      include: {
+        person: true,
+        members: {
+          include: { person: true },
+          orderBy: [{ role: "asc" }, { order: "asc" }],
+        },
       },
-    },
+    });
+
+    return { member, updatedNode };
   });
 
   revalidateOrganigrama(input.schoolSlug);
-  return { member, node: normalizeNode(updatedNode) };
+  return {
+    member: result.member,
+    node: normalizeNode(result.updatedNode),
+  };
 }
 
 export async function deleteNodeMemberAction(input: {

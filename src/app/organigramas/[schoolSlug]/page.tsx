@@ -1,6 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { ArrowLeft, Edit3, GitBranch, Home, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Edit3,
+  GitBranch,
+  History,
+  Home,
+  Trash2,
+} from "lucide-react";
 import { notFound } from "next/navigation";
 import { OrgChartCanvas } from "../../../components/organigramas/OrgChartCanvas";
 import { prisma } from "../../../lib/prisma";
@@ -8,6 +16,7 @@ import { deleteOrgChartFormAction } from "./editar/actions";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
+  searchParams: Promise<{ organigrama?: string | string[] }>;
 };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -22,14 +31,25 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function SchoolOrganigramaPage({ params }: PageProps) {
+export default async function SchoolOrganigramaPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { schoolSlug } = await params;
+  const requestedChartParam = (await searchParams).organigrama;
+  const requestedChartId = Array.isArray(requestedChartParam)
+    ? requestedChartParam[0]
+    : requestedChartParam;
 
   const school = await (prisma as any).school.findUnique({
     where: { slug: schoolSlug },
     include: {
       orgCharts: {
-        orderBy: { year: "desc" },
+        orderBy: [
+          { year: "desc" },
+          { version: "desc" },
+          { createdAt: "desc" },
+        ],
         include: {
           nodes: {
             orderBy: { order: "asc" },
@@ -50,7 +70,9 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
 
   if (!school) notFound();
 
-  const currentChart = school.orgCharts[0];
+  const currentChart =
+    school.orgCharts.find((chart: any) => chart.id === requestedChartId) ??
+    school.orgCharts[0];
 
   const visualNodes = currentChart?.nodes.map((node: any) => ({
     id: node.id,
@@ -119,7 +141,7 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
                 <Badge>{currentChart.status}</Badge>
                 <Badge>{totalPeople} personas</Badge>
                 <Badge>{totalHours} hs.</Badge>
-                <Link href={`/organigramas/${school.slug}/editar`} className="inline-flex items-center gap-2 rounded-full bg-blue-700 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-blue-800">
+                <Link href={`/organigramas/${school.slug}/editar?organigrama=${currentChart.id}`} className="inline-flex items-center gap-2 rounded-full bg-blue-700 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-blue-800">
                   <Edit3 className="h-4 w-4" /> Editar
                 </Link>
 
@@ -145,13 +167,77 @@ export default async function SchoolOrganigramaPage({ params }: PageProps) {
             ) : null}
           </div>
 
+          {school.orgCharts.length > 1 ? (
+            <div className="mb-6 rounded-3xl border border-blue-100 bg-blue-50/70 p-5">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-700 shadow-sm">
+                  <History className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="font-black text-slate-950">
+                    Organigramas disponibles
+                  </h2>
+                  <p className="mt-1 text-sm font-semibold leading-relaxed text-slate-600">
+                    Elegí exactamente cuál querés ver o editar. El cambio de
+                    versión no modifica los demás.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                {school.orgCharts.map((chart: any) => {
+                  const isSelected = chart.id === currentChart?.id;
+
+                  return (
+                    <Link
+                      key={chart.id}
+                      href={`/organigramas/${school.slug}?organigrama=${chart.id}`}
+                      className={`rounded-2xl border p-4 transition ${
+                        isSelected
+                          ? "border-blue-300 bg-white shadow-sm"
+                          : "border-transparent bg-white/60 hover:border-blue-200 hover:bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black leading-snug text-slate-950">
+                            {chart.title}
+                          </p>
+                          <p className="mt-2 text-xs font-bold text-slate-500">
+                            Año {chart.year} · Versión {chart.version ?? 1} ·{" "}
+                            {chart.status}
+                          </p>
+                        </div>
+                        {isSelected ? (
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            Abierto
+                          </span>
+                        ) : (
+                          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
+                            Abrir
+                          </span>
+                        )}
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {currentChart && visualNodes.length > 0 ? (
-            <OrgChartCanvas nodes={visualNodes} edges={visualEdges} schoolSlug={school.slug} />
+            <OrgChartCanvas
+              nodes={visualNodes}
+              edges={visualEdges}
+              schoolSlug={school.slug}
+              orgChartTitle={currentChart?.title}
+            />
           ) : (
             <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
               <h2 className="text-xl font-black text-slate-950">Este colegio todavía no tiene nodos cargados</h2>
               <p className="mx-auto mt-3 max-w-2xl text-slate-600">Entrá al editor para cargar cargos, personas, horas y relaciones.</p>
-              <Link href={`/organigramas/${school.slug}/editar`} className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800">
+              <Link href={`/organigramas/${school.slug}/editar?organigrama=${currentChart?.id ?? ""}`} className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800">
                 <Edit3 className="h-4 w-4" /> Abrir editor
               </Link>
             </div>
