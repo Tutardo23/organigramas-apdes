@@ -1014,10 +1014,6 @@ function buildEdge(
         ? relationKindLabel(edge)
         : undefined,
     type: secondary && routeOptions ? "movableRelationEdge" : "smoothstep",
-    pathOptions: {
-      offset: routing.pathOffset,
-      borderRadius: routing.borderRadius,
-    },
     interactionWidth: 30,
     data:
       secondary && routeOptions
@@ -1957,10 +1953,6 @@ function buildMapEdge(
         ? relationKindLabel(edge)
         : undefined,
     type: secondary && routeOptions ? "movableRelationEdge" : "smoothstep",
-    pathOptions: {
-      offset: routing.pathOffset,
-      borderRadius: routing.borderRadius,
-    },
     interactionWidth: 30,
     data:
       secondary && routeOptions
