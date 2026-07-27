@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "../../../../lib/prisma";
 import {
+  packEdgeLabelStorage,
+  parseEdgeLabelStorage,
+  type StoredEdgeRoute,
+} from "../../../../lib/org-edge-route";
+import {
   institutionalTemplateNodes,
   normalizeTemplateTitle,
 } from "../../../../lib/org-chart-template";
@@ -18,6 +23,16 @@ function numberOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeEdgeForClient(edge: any) {
+  const stored = parseEdgeLabelStorage(edge.label);
+  return {
+    ...edge,
+    label: stored.label,
+    routeOrientation: stored.route?.orientation ?? null,
+    routeOffset: stored.route?.offset ?? null,
+  };
 }
 
 const NODE_AREAS = [
@@ -565,12 +580,16 @@ export async function createEdgeAction(input: {
     },
   });
 
+  const existingStored = existingEdge
+    ? parseEdgeLabelStorage(existingEdge.label)
+    : { label: null, route: null };
+
   const edge = existingEdge
     ? await (prisma as any).orgEdge.update({
         where: { id: existingEdge.id },
         data: {
           type: safeEdgeType(input.type),
-          label: textOrNull(input.label),
+          label: packEdgeLabelStorage(textOrNull(input.label), existingStored.route),
         },
       })
     : await (prisma as any).orgEdge.create({
@@ -579,12 +598,12 @@ export async function createEdgeAction(input: {
           sourceId: input.sourceId,
           targetId: input.targetId,
           type: safeEdgeType(input.type),
-          label: textOrNull(input.label),
+          label: packEdgeLabelStorage(textOrNull(input.label), null),
         },
       });
 
   revalidateOrganigrama(input.schoolSlug);
-  return edge;
+  return normalizeEdgeForClient(edge);
 }
 
 export async function updateEdgeAction(input: {
@@ -601,16 +620,15 @@ export async function updateEdgeAction(input: {
     throw new Error("No se encontró la relación para actualizar.");
   }
 
+  const stored = parseEdgeLabelStorage(currentEdge.label);
   const edge = await (prisma as any).orgEdge.update({
     where: { id: input.edgeId },
     data: {
       type: safeEdgeType(input.type),
-      label: textOrNull(input.label),
+      label: packEdgeLabelStorage(textOrNull(input.label), stored.route),
     },
   });
 
-  // Una pareja de cajas debe tener una sola relación vigente. Esto limpia
-  // conexiones antiguas que podían quedar superpuestas al cambiar el tipo.
   await (prisma as any).orgEdge.deleteMany({
     where: {
       orgChartId: currentEdge.orgChartId,
@@ -621,7 +639,35 @@ export async function updateEdgeAction(input: {
   });
 
   revalidateOrganigrama(input.schoolSlug);
-  return edge;
+  return normalizeEdgeForClient(edge);
+}
+
+export async function updateEdgeRouteAction(input: {
+  edgeId: string;
+  schoolSlug: string;
+  route: StoredEdgeRoute | null;
+}) {
+  const currentEdge = await (prisma as any).orgEdge.findUnique({
+    where: { id: input.edgeId },
+  });
+
+  if (!currentEdge) {
+    throw new Error("No se encontró la relación para guardar su recorrido.");
+  }
+  if (currentEdge.type === "JERARQUICA") {
+    throw new Error("Las relaciones jerárquicas no admiten recorrido manual.");
+  }
+
+  const stored = parseEdgeLabelStorage(currentEdge.label);
+  const edge = await (prisma as any).orgEdge.update({
+    where: { id: input.edgeId },
+    data: {
+      label: packEdgeLabelStorage(stored.label, input.route),
+    },
+  });
+
+  revalidateOrganigrama(input.schoolSlug);
+  return normalizeEdgeForClient(edge);
 }
 
 export async function deleteEdgeAction(input: {

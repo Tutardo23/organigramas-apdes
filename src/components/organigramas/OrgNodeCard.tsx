@@ -70,6 +70,8 @@ export type OrgEdgeData = {
   targetId: string;
   type: string;
   label: string | null;
+  routeOrientation?: "horizontal" | "vertical" | null;
+  routeOffset?: number | null;
 };
 
 export const areaLabels: Record<string, string> = {

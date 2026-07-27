@@ -12,6 +12,7 @@ import {
 import { notFound } from "next/navigation";
 import { OrgChartCanvas } from "../../../components/organigramas/OrgChartCanvas";
 import { prisma } from "../../../lib/prisma";
+import { parseEdgeLabelStorage } from "../../../lib/org-edge-route";
 import { deleteOrgChartFormAction } from "./editar/actions";
 
 type PageProps = {
@@ -90,13 +91,18 @@ export default async function SchoolOrganigramaPage({
     members: node.members ?? [],
   })) ?? [];
 
-  const visualEdges = currentChart?.edges.map((edge: any) => ({
-    id: edge.id,
-    sourceId: edge.sourceId,
-    targetId: edge.targetId,
-    type: edge.type,
-    label: edge.label,
-  })) ?? [];
+  const visualEdges = currentChart?.edges.map((edge: any) => {
+    const stored = parseEdgeLabelStorage(edge.label);
+    return {
+      id: edge.id,
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      type: edge.type,
+      label: stored.label,
+      routeOrientation: stored.route?.orientation ?? null,
+      routeOffset: stored.route?.offset ?? null,
+    };
+  }) ?? [];
 
   const totalPeople = new Set(
     visualNodes.flatMap((node: any) => [
@@ -231,6 +237,7 @@ export default async function SchoolOrganigramaPage({
               nodes={visualNodes}
               edges={visualEdges}
               schoolSlug={school.slug}
+              orgChartId={currentChart.id}
               orgChartTitle={currentChart?.title}
             />
           ) : (

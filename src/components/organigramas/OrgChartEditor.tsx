@@ -88,6 +88,8 @@ type EditorEdgeData = {
   targetId: string;
   type: string;
   label: string | null;
+  routeOrientation?: "horizontal" | "vertical" | null;
+  routeOffset?: number | null;
 };
 
 type ReviewNoteData = {

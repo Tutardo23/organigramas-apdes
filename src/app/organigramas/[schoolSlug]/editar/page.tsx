@@ -3,6 +3,7 @@ import { ArrowLeft, Eye, Home, ListTree, Trash2 } from "lucide-react";
 import { notFound } from "next/navigation";
 import { OrgChartEditor } from "../../../../components/organigramas/OrgChartEditor";
 import { prisma } from "../../../../lib/prisma";
+import { parseEdgeLabelStorage } from "../../../../lib/org-edge-route";
 import { deleteOrgChartFormAction } from "./actions";
 
 type PageProps = {
@@ -88,13 +89,18 @@ export default async function EditOrganigramaPage({
     members: node.members ?? [],
   }));
 
-  const initialEdges = currentChart.edges.map((edge: any) => ({
-    id: edge.id,
-    sourceId: edge.sourceId,
-    targetId: edge.targetId,
-    type: edge.type,
-    label: edge.label,
-  }));
+  const initialEdges = currentChart.edges.map((edge: any) => {
+    const stored = parseEdgeLabelStorage(edge.label);
+    return {
+      id: edge.id,
+      sourceId: edge.sourceId,
+      targetId: edge.targetId,
+      type: edge.type,
+      label: stored.label,
+      routeOrientation: stored.route?.orientation ?? null,
+      routeOffset: stored.route?.offset ?? null,
+    };
+  });
 
   const initialReviewNotes = (currentChart.reviewNotes ?? []).map((note: any) => ({
     id: note.id,

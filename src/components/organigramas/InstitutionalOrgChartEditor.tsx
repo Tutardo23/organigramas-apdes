@@ -47,6 +47,7 @@ import {
   createElement,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
   type ReactNode,
@@ -60,6 +61,7 @@ import {
   deleteNodeMemberAction,
   moveNodeAction,
   updateEdgeAction,
+  updateEdgeRouteAction,
   updateNodeAction,
   updateNodesPositionsAction,
   updateOrgChartStatusAction,
@@ -100,6 +102,13 @@ type EditorEdgeData = {
   targetId: string;
   type: string;
   label: string | null;
+  routeOrientation?: "horizontal" | "vertical" | null;
+  routeOffset?: number | null;
+};
+
+type ManualEdgeRoute = {
+  orientation: "horizontal" | "vertical";
+  offset: number;
 };
 
 type ReviewNoteData = {
@@ -171,7 +180,12 @@ type RelationEdgeData = {
   edgeType: string;
   displayLabel: string;
   selected: boolean;
+  editable: boolean;
+  route: ManualEdgeRoute | null;
+  defaultOrientation: "horizontal" | "vertical";
   onSelect: (edgeId: string) => void;
+  onRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
+  onRouteReset?: (edgeId: string) => void;
 };
 
 const defaultMemberDraft: MemberDraft = {
@@ -278,6 +292,40 @@ function relationLabel(edge: Pick<EditorEdgeData, "type" | "label">) {
   const custom = edge.label?.trim();
   if (custom) return custom;
   return relationNames[edge.type] ?? edgeLabels[edge.type] ?? "Relación";
+}
+
+function buildOrthogonalEdgePath({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  route,
+}: {
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+  route: ManualEdgeRoute;
+}) {
+  if (route.orientation === "horizontal") {
+    const laneY = (sourceY + targetY) / 2 + route.offset;
+    return {
+      path: `M ${sourceX} ${sourceY} L ${sourceX} ${laneY} L ${targetX} ${laneY} L ${targetX} ${targetY}`,
+      labelX: (sourceX + targetX) / 2,
+      labelY: laneY,
+      handleX: (sourceX + targetX) / 2,
+      handleY: laneY,
+    };
+  }
+
+  const laneX = (sourceX + targetX) / 2 + route.offset;
+  return {
+    path: `M ${sourceX} ${sourceY} L ${laneX} ${sourceY} L ${laneX} ${targetY} L ${targetX} ${targetY}`,
+    labelX: laneX,
+    labelY: (sourceY + targetY) / 2,
+    handleX: laneX,
+    handleY: (sourceY + targetY) / 2,
+  };
 }
 
 function inputClass(extra = "") {
@@ -482,7 +530,19 @@ function InstitutionalEdge({
   style,
   data,
 }: EdgeProps<Edge<RelationEdgeData>>) {
-  const [edgePath, labelX, labelY] = getSmoothStepPath({
+  const dragStartRef = useRef<{
+    pointerX: number;
+    pointerY: number;
+    offset: number;
+    orientation: "horizontal" | "vertical";
+  } | null>(null);
+
+  const computedRoute = data?.route ?? {
+    orientation: data?.defaultOrientation ?? "horizontal",
+    offset: 0,
+  };
+
+  const autoPath = getSmoothStepPath({
     sourceX,
     sourceY,
     targetX,
@@ -492,6 +552,47 @@ function InstitutionalEdge({
     borderRadius: 10,
     offset: 22,
   });
+
+  const manualPath = buildOrthogonalEdgePath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    route: computedRoute,
+  });
+
+  const hasManualRoute = Boolean(data?.route);
+  const edgePath = hasManualRoute ? manualPath.path : autoPath[0];
+  const labelX = hasManualRoute ? manualPath.labelX : autoPath[1];
+  const labelY = hasManualRoute ? manualPath.labelY : autoPath[2];
+  const handleX = manualPath.handleX;
+  const handleY = manualPath.handleY;
+
+  useEffect(() => {
+    function handlePointerMove(event: PointerEvent) {
+      const drag = dragStartRef.current;
+      if (!drag || !data?.onRouteChange) return;
+      const delta =
+        drag.orientation === "horizontal"
+          ? event.clientY - drag.pointerY
+          : event.clientX - drag.pointerX;
+      data.onRouteChange(id, {
+        orientation: drag.orientation,
+        offset: Math.round((drag.offset + delta) / 2) * 2,
+      });
+    }
+
+    function handlePointerUp() {
+      dragStartRef.current = null;
+    }
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [data, id]);
 
   return (
     <>
@@ -525,9 +626,41 @@ function InstitutionalEdge({
           </button>
         </EdgeLabelRenderer>
       ) : null}
+      {data?.editable && data.edgeType !== "JERARQUICA" && data.selected ? (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className="nodrag nopan absolute h-5 w-5 rounded-full border-2 border-blue-600 bg-white shadow-md"
+            style={{
+              transform: `translate(-50%, -50%) translate(${handleX}px, ${handleY}px)`,
+              cursor:
+                computedRoute.orientation === "horizontal" ? "ns-resize" : "ew-resize",
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              dragStartRef.current = {
+                pointerX: event.clientX,
+                pointerY: event.clientY,
+                offset: computedRoute.offset,
+                orientation: computedRoute.orientation,
+              };
+              if (!data.route && data.onRouteChange) {
+                data.onRouteChange(id, {
+                  orientation: computedRoute.orientation,
+                  offset: 0,
+                });
+              }
+            }}
+            title="Arrastrá para mover la ruta de la relación"
+            aria-label="Mover ruta de la relación"
+          />
+        </EdgeLabelRenderer>
+      ) : null}
     </>
   );
 }
+
 
 const nodeTypes: NodeTypes = {
   institutionalNode: InstitutionalNode,
@@ -613,6 +746,8 @@ export function InstitutionalOrgChartEditor({
   const [people, setPeople] = useState<PersonPreview[]>(initialPeople);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const edgeRouteStorageKey = `org-edge-routes:${schoolSlug}:${orgChartId}`;
+  const [edgeRoutes, setEdgeRoutes] = useState<Record<string, ManualEdgeRoute>>({});
   const [relationLayout, setRelationLayout] = useState<{
     key: string;
     positions: Map<string, { x: number; y: number }>;
@@ -739,6 +874,61 @@ export function InstitutionalOrgChartEditor({
     [mode, nodes, relationLayout, relationScene, relationSceneKey],
   );
 
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(edgeRouteStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Record<string, ManualEdgeRoute>;
+      setEdgeRoutes(parsed ?? {});
+    } catch {}
+  }, [edgeRouteStorageKey]);
+
+  useEffect(() => {
+    const validIds = new Set(edges.map((edge) => edge.id));
+    setEdgeRoutes((current) => {
+      let changed = false;
+      const next: Record<string, ManualEdgeRoute> = {};
+      for (const [edgeId, route] of Object.entries(current)) {
+        if (validIds.has(edgeId)) next[edgeId] = route;
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [edges]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(edgeRouteStorageKey, JSON.stringify(edgeRoutes));
+    } catch {}
+  }, [edgeRouteStorageKey, edgeRoutes]);
+
+  function changeEdgeRoute(edgeId: string, patch: Partial<ManualEdgeRoute>) {
+    const currentEdge = edges.find((edge) => edge.id === edgeId);
+    const source = displayedNodes.find((node) => node.id === currentEdge?.sourceId);
+    const target = displayedNodes.find((node) => node.id === currentEdge?.targetId);
+    const defaultOrientation: ManualEdgeRoute["orientation"] =
+      source && target && Math.abs(target.position.x - source.position.x) >= Math.abs(target.position.y - source.position.y)
+        ? "horizontal"
+        : "vertical";
+
+    setEdgeRoutes((current) => ({
+      ...current,
+      [edgeId]: {
+        orientation: current[edgeId]?.orientation ?? defaultOrientation,
+        offset: current[edgeId]?.offset ?? 0,
+        ...patch,
+      },
+    }));
+  }
+
+  function resetEdgeRoute(edgeId: string) {
+    setEdgeRoutes((current) => {
+      const next = { ...current };
+      delete next[edgeId];
+      return next;
+    });
+  }
+
   function selectEdge(edgeId: string) {
     const edge = edges.find((item) => item.id === edgeId);
     if (!edge) return;
@@ -767,9 +957,17 @@ export function InstitutionalOrgChartEditor({
       return relationScene.visibleRelationIds.has(edge.id);
     });
 
+    const displayedNodeById = new Map(displayedNodes.map((node) => [node.id, node]));
+
     return visible.map((edge): Edge<RelationEdgeData> => {
       const hierarchy = edge.type === "JERARQUICA";
       const color = relationColors[edge.type] ?? "#64748b";
+      const sourceNode = displayedNodeById.get(edge.sourceId);
+      const targetNode = displayedNodeById.get(edge.targetId);
+      const defaultOrientation: ManualEdgeRoute["orientation"] =
+        sourceNode && targetNode && Math.abs(targetNode.position.x - sourceNode.position.x) >= Math.abs(targetNode.position.y - sourceNode.position.y)
+          ? "horizontal"
+          : "vertical";
       return {
         id: edge.id,
         source: edge.sourceId,
@@ -794,7 +992,12 @@ export function InstitutionalOrgChartEditor({
           edgeType: edge.type,
           displayLabel: hierarchy ? "" : relationLabel(edge),
           selected: selectedEdgeId === edge.id,
+          editable: true,
+          route: hierarchy ? null : edgeRoutes[edge.id] ?? null,
+          defaultOrientation,
           onSelect: selectEdge,
+          onRouteChange: hierarchy ? undefined : changeEdgeRoute,
+          onRouteReset: hierarchy ? undefined : resetEdgeRoute,
         },
       };
     });
@@ -1274,6 +1477,8 @@ export function InstitutionalOrgChartEditor({
                   targetId: updated.targetId,
                   type: updated.type,
                   label: updated.label,
+                  routeOrientation: updated.routeOrientation ?? null,
+                  routeOffset: updated.routeOffset ?? null,
                 }
               : edge,
           ),
@@ -1340,6 +1545,48 @@ export function InstitutionalOrgChartEditor({
         notify(next === "REVIEW" ? "Enviado a revisión" : "Publicado");
       } catch {
         notify("No se pudo cambiar el estado", "error");
+      }
+    });
+  }
+
+  function handleEdgeRouteCommit(
+    edgeId: string,
+    route: { orientation: "horizontal" | "vertical"; offset: number } | null,
+  ) {
+    setEdges((current) =>
+      current.map((edge) =>
+        edge.id === edgeId
+          ? {
+              ...edge,
+              routeOrientation: route?.orientation ?? null,
+              routeOffset: route?.offset ?? null,
+            }
+          : edge,
+      ),
+    );
+
+    startTransition(async () => {
+      try {
+        const updated = await updateEdgeRouteAction({
+          edgeId,
+          schoolSlug,
+          route,
+        });
+        setEdges((current) =>
+          current.map((edge) =>
+            edge.id === edgeId
+              ? {
+                  ...edge,
+                  label: updated.label,
+                  routeOrientation: updated.routeOrientation,
+                  routeOffset: updated.routeOffset,
+                }
+              : edge,
+          ),
+        );
+        notify(route ? "Recorrido de la relación guardado" : "Recorrido automático restaurado");
+      } catch {
+        notify("No se pudo guardar el recorrido de la relación", "error");
       }
     });
   }
@@ -1417,6 +1664,7 @@ export function InstitutionalOrgChartEditor({
           nodes={canvasNodes}
           edges={edges}
           schoolSlug={schoolSlug}
+          orgChartId={orgChartId}
           orgChartTitle={orgChartTitle}
           designMode="institutional"
           editable
@@ -1435,6 +1683,7 @@ export function InstitutionalOrgChartEditor({
           onNodeMove={handleUnifiedNodeMove}
           onNodesMove={handleUnifiedNodesMove}
           onEdgeSelect={selectEdge}
+          onEdgeRouteCommit={handleEdgeRouteCommit}
         />
 
         {showNewNode ? (
@@ -2188,6 +2437,14 @@ function RelationsPanel({
             }
             placeholder="Etiqueta opcional"
           />
+          {selectedEdge.type !== "JERARQUICA" ? (
+            <div className="rounded-xl border border-blue-200 bg-white p-3">
+              <p className="text-xs font-black text-slate-900">Mover recorrido</p>
+              <p className="mt-1 text-[0.68rem] font-semibold leading-relaxed text-slate-500">
+                Tocá esta relación en el organigrama y arrastrá el punto blanco que aparece sobre la línea. Solo cambia el recorrido visual; no cambia origen, destino ni tipo de vínculo.
+              </p>
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={onSave}

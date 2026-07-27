@@ -3,13 +3,17 @@
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
   applyNodeChanges,
+  useReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeChange,
   type NodeProps,
@@ -48,6 +52,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { isElBuenAyreNewProposal } from "../../lib/org-chart-design";
@@ -66,6 +71,7 @@ type Props = {
   nodes: OrgNodeData[];
   edges: OrgEdgeData[];
   schoolSlug: string;
+  orgChartId?: string | null;
   orgChartTitle?: string | null;
   designMode?: "legacy" | "institutional";
   editable?: boolean;
@@ -75,6 +81,10 @@ type Props = {
   onNodeMove?: (input: { nodeId: string; positionX: number; positionY: number }) => void;
   onNodesMove?: (positions: Array<{ nodeId: string; positionX: number; positionY: number }>) => void;
   onEdgeSelect?: (edgeId: string) => void;
+  onEdgeRouteCommit?: (
+    edgeId: string,
+    route: { orientation: "horizontal" | "vertical"; offset: number } | null,
+  ) => void;
 };
 
 type SectionKey =
@@ -90,6 +100,27 @@ type CanvasViewMode = "institutional" | "sections";
 type RelationScope = "all" | "focus";
 type AreasLayoutPoint = { positionX: number; positionY: number };
 type AreasLayoutMap = Record<string, AreasLayoutPoint>;
+
+type ManualEdgeRoute = {
+  orientation: "horizontal" | "vertical";
+  offset: number;
+};
+
+type MovableRelationEdgeData = {
+  displayLabel: string;
+  selected: boolean;
+  editable: boolean;
+  route: ManualEdgeRoute | null;
+  defaultOrientation: ManualEdgeRoute["orientation"];
+  defaultOffset: number;
+  pathOffset: number;
+  borderRadius: number;
+  onSelect?: (edgeId: string) => void;
+  strokeColor: string;
+  onRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
+  onRouteReset?: (edgeId: string) => void;
+  onRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
+};
 
 type SectionDefinition = {
   key: Exclude<SectionKey, "overview">;
@@ -583,10 +614,360 @@ function InstitutionalMapNode({
   );
 }
 
+function buildOrthogonalRelationPath({
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  route,
+}: {
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+  route: ManualEdgeRoute;
+}) {
+  if (route.orientation === "horizontal") {
+    const laneY = (sourceY + targetY) / 2 + route.offset;
+    return {
+      path: `M ${sourceX} ${sourceY} L ${sourceX} ${laneY} L ${targetX} ${laneY} L ${targetX} ${targetY}`,
+      labelX: (sourceX + targetX) / 2,
+      labelY: laneY,
+      handleX: (sourceX + targetX) / 2,
+      handleY: laneY,
+    };
+  }
+
+  const laneX = (sourceX + targetX) / 2 + route.offset;
+  return {
+    path: `M ${sourceX} ${sourceY} L ${laneX} ${sourceY} L ${laneX} ${targetY} L ${targetX} ${targetY}`,
+    labelX: laneX,
+    labelY: (sourceY + targetY) / 2,
+    handleX: laneX,
+    handleY: (sourceY + targetY) / 2,
+  };
+}
+
+function MovableRelationEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerStart,
+  markerEnd,
+  style,
+  data,
+}: EdgeProps<Edge<MovableRelationEdgeData>>) {
+  const { getZoom } = useReactFlow();
+  const dragRef = useRef<{
+    pointerX: number;
+    pointerY: number;
+    offset: number;
+    currentOffset: number;
+    orientation: ManualEdgeRoute["orientation"];
+  } | null>(null);
+
+  const defaultRoute: ManualEdgeRoute = {
+    orientation: data?.defaultOrientation ?? "horizontal",
+    offset: data?.defaultOffset ?? 0,
+  };
+  const activeRoute = data?.route ?? defaultRoute;
+
+  const manualPath = buildOrthogonalRelationPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    route: activeRoute,
+  });
+  // Las relaciones no jerárquicas usan siempre el corredor ortogonal externo.
+  // Si el usuario la movió, activeRoute contiene su ajuste manual; si no, usa
+  // el corredor automático inspirado en el organigrama original.
+  const edgePath = manualPath.path;
+  const labelX = manualPath.labelX;
+  const labelY = manualPath.labelY;
+
+  function startRouteDrag(event: ReactPointerEvent<HTMLElement>) {
+    if (!data?.editable) return;
+    event.preventDefault();
+    event.stopPropagation();
+    data.onSelect?.(id);
+    if (!data.route) {
+      data.onRouteChange?.(id, defaultRoute);
+    }
+    dragRef.current = {
+      pointerX: event.clientX,
+      pointerY: event.clientY,
+      offset: activeRoute.offset,
+      currentOffset: activeRoute.offset,
+      orientation: activeRoute.orientation,
+    };
+  }
+
+  useEffect(() => {
+    function onPointerMove(event: PointerEvent) {
+      const drag = dragRef.current;
+      if (!drag || !data?.onRouteChange) return;
+      const zoom = Math.max(0.08, getZoom());
+      const screenDelta =
+        drag.orientation === "horizontal"
+          ? event.clientY - drag.pointerY
+          : event.clientX - drag.pointerX;
+      const flowDelta = screenDelta / zoom;
+      const nextOffset = Math.round((drag.offset + flowDelta) / 2) * 2;
+      drag.currentOffset = nextOffset;
+      data.onRouteChange(id, {
+        orientation: drag.orientation,
+        offset: nextOffset,
+      });
+    }
+    function onPointerUp() {
+      const drag = dragRef.current;
+      if (drag) {
+        data?.onRouteCommit?.(id, {
+          orientation: drag.orientation,
+          offset: drag.currentOffset,
+        });
+      }
+      dragRef.current = null;
+    }
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, [data, getZoom, id]);
+
+  const destinationRotation =
+    targetPosition === Position.Left
+      ? 0
+      : targetPosition === Position.Right
+        ? 180
+        : targetPosition === Position.Top
+          ? 90
+          : -90;
+
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerStart={markerStart}
+        markerEnd={markerEnd}
+        style={style}
+        interactionWidth={34}
+      />
+      <EdgeLabelRenderer>
+        <span
+          className="pointer-events-none absolute h-6 w-6 rounded-full border-4 border-white shadow-md ring-2 ring-slate-900/20"
+          style={{
+            transform: `translate(-50%, -50%) translate(${sourceX}px, ${sourceY}px)`,
+            backgroundColor: data?.strokeColor ?? "#64748b",
+          }}
+          aria-hidden="true"
+        />
+      </EdgeLabelRenderer>
+      <EdgeLabelRenderer>
+        <span
+          className="pointer-events-none absolute z-30 flex h-7 w-7 items-center justify-center rounded-full border-[3px] border-white bg-white shadow-lg ring-2 ring-slate-900/20"
+          style={{
+            transform: `translate(-50%, -50%) translate(${targetX}px, ${targetY}px)`,
+            color: data?.strokeColor ?? "#64748b",
+          }}
+          aria-hidden="true"
+        >
+          <ArrowRight
+            className="h-5 w-5 stroke-[3]"
+            style={{ transform: `rotate(${destinationRotation}deg)` }}
+          />
+        </span>
+      </EdgeLabelRenderer>
+      {data?.selected ? (
+        <EdgeLabelRenderer>
+          <span
+            className="pointer-events-none absolute rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[0.58rem] font-black uppercase tracking-[0.08em] text-slate-600 shadow-sm"
+            style={{
+              transform: `translate(-50%, -50%) translate(${sourceX + 34}px, ${sourceY - 18}px)`,
+            }}
+          >
+            Origen
+          </span>
+        </EdgeLabelRenderer>
+      ) : null}
+      {data?.selected ? (
+        <EdgeLabelRenderer>
+          <span
+            className="pointer-events-none absolute z-30 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[0.58rem] font-black uppercase tracking-[0.08em] text-slate-600 shadow-sm"
+            style={{
+              transform: `translate(-50%, -50%) translate(${targetX + 38}px, ${targetY - 18}px)`,
+            }}
+          >
+            Destino
+          </span>
+        </EdgeLabelRenderer>
+      ) : null}
+      {data?.displayLabel ? (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className={`nodrag nopan absolute rounded-full border bg-white px-2.5 py-1 text-[0.66rem] font-black shadow-sm transition ${
+              data.selected
+                ? "border-blue-500 text-blue-700 ring-2 ring-blue-100"
+                : data.editable
+                  ? "border-slate-300 text-slate-700 hover:border-blue-400 hover:bg-blue-50"
+                  : "border-slate-200 text-slate-700"
+            }`}
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              cursor: data.editable
+                ? activeRoute.orientation === "horizontal"
+                  ? "ns-resize"
+                  : "ew-resize"
+                : "pointer",
+            }}
+            onPointerDown={data.editable ? startRouteDrag : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              data.onSelect?.(id);
+            }}
+            title={
+              data.editable
+                ? "Arrastrá esta etiqueta para mover el recorrido de la relación"
+                : undefined
+            }
+          >
+            {data.displayLabel}
+          </button>
+        </EdgeLabelRenderer>
+      ) : null}
+      {data?.editable && data.selected ? (
+        <EdgeLabelRenderer>
+          <button
+            type="button"
+            className="nodrag nopan absolute h-7 w-7 rounded-full border-[3px] border-blue-600 bg-white shadow-lg"
+            style={{
+              transform: `translate(-50%, -50%) translate(${manualPath.handleX}px, ${manualPath.handleY}px)`,
+              cursor:
+                activeRoute.orientation === "horizontal" ? "ns-resize" : "ew-resize",
+            }}
+            onPointerDown={startRouteDrag}
+            aria-label="Mover recorrido de la relación"
+            title="Arrastrá este punto o la etiqueta para mover la relación"
+          />
+          <button
+            type="button"
+            className="nodrag nopan absolute rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-[0.62rem] font-black text-slate-700 shadow"
+            style={{
+              transform: `translate(-50%, -50%) translate(${manualPath.handleX + 22}px, ${manualPath.handleY - 14}px)`,
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              const nextRoute: ManualEdgeRoute = {
+                orientation:
+                  activeRoute.orientation === "horizontal" ? "vertical" : "horizontal",
+                offset: 0,
+              };
+              data.onRouteChange?.(id, nextRoute);
+              data.onRouteCommit?.(id, nextRoute);
+            }}
+            title="Cambiar orientación de la ruta"
+          >
+            {activeRoute.orientation === "horizontal" ? "↕" : "↔"}
+          </button>
+          {data.route ? (
+            <button
+              type="button"
+              className="nodrag nopan absolute rounded-md border border-rose-200 bg-white px-1.5 py-0.5 text-[0.62rem] font-black text-rose-700 shadow"
+              style={{
+                transform: `translate(-50%, -50%) translate(${manualPath.handleX - 22}px, ${manualPath.handleY - 14}px)`,
+              }}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                data.onRouteReset?.(id);
+                data.onRouteCommit?.(id, null);
+              }}
+              title="Volver a ruta automática"
+            >
+              ↺
+            </button>
+          ) : null}
+        </EdgeLabelRenderer>
+      ) : null}
+    </>
+  );
+}
+
 const nodeTypes: NodeTypes = {
   focusedNode: FocusedNode,
   institutionalMapNode: InstitutionalMapNode,
 };
+
+const edgeTypes = {
+  movableRelationEdge: MovableRelationEdge,
+};
+
+function defaultExternalRelationRoute(
+  edge: OrgEdgeData,
+  source: Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+  target: Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+) {
+  if (!source || !target || edge.type === "JERARQUICA") {
+    return { orientation: "horizontal" as const, offset: 0 };
+  }
+
+  const sourceData = source.data as OrgNodeData;
+  const targetData = target.data as OrgNodeData;
+  const sourceX = source.position.x;
+  const targetX = target.position.x;
+  const sourceY = source.position.y;
+  const targetY = target.position.y;
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+  const midpointY = (sourceY + targetY) / 2;
+  const variant = stableHash(`${edge.sourceId}:${edge.targetId}:${edge.type}`) % 5;
+  const collective = isCollectiveNode(sourceData) || isCollectiveNode(targetData);
+  const header = isSectionHeader(sourceData) || isSectionHeader(targetData);
+  const sameSection = sectionForNode(sourceData) === sectionForNode(targetData);
+
+  // Toda relación dentro de la misma área se mantiene LOCAL. Esto incluye
+  // Consejo Académico, equipos directivos y niveles: nunca debe salir del
+  // bloque académico para volver a entrar por un corredor lejano.
+  if (sameSection) {
+    const localVariant = (variant - 2) * 18;
+    if (absDx >= absDy) {
+      return { orientation: "vertical" as const, offset: localVariant };
+    }
+    return { orientation: "horizontal" as const, offset: localVariant };
+  }
+
+  // Consejo/comités viven arriba: las relaciones llegan por un corredor superior.
+  if (collective) {
+    const laneY = Math.min(sourceY, targetY) - 78 - variant * 24;
+    return { orientation: "horizontal" as const, offset: laneY - midpointY };
+  }
+
+  // Los encabezados de área se conectan por una banda superior cercana.
+  if (header) {
+    const laneY = Math.min(sourceY, targetY) - 54 - variant * 18;
+    return { orientation: "horizontal" as const, offset: laneY - midpointY };
+  }
+
+  // Para relaciones largas o entre áreas conservamos el criterio del
+  // organigrama original: corredores externos inferiores separados.
+  const baseDistance = edge.type === "DECISION" ? 220 : 125;
+  const laneY = Math.max(sourceY, targetY) + baseDistance + variant * 32;
+  return { orientation: "horizontal" as const, offset: laneY - midpointY };
+}
+
 
 function buildEdge(
   edge: OrgEdgeData,
@@ -594,6 +975,15 @@ function buildEdge(
   selectedNodeId: string | null,
   nodeById: Map<string, Node<FocusedNodeData>>,
   showRelationLabel = true,
+  routeOptions?: {
+    selectedEdgeId: string | null;
+    editable: boolean;
+    routes: Record<string, ManualEdgeRoute>;
+    onSelect?: (edgeId: string) => void;
+    onRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
+    onRouteReset?: (edgeId: string) => void;
+    onRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
+  },
 ): Edge {
   const hierarchy = edge.type === "JERARQUICA";
   const contextual =
@@ -604,21 +994,12 @@ function buildEdge(
   const mutedHierarchy = relationMode !== "structure";
   const source = nodeById.get(edge.sourceId);
   const target = nodeById.get(edge.targetId);
-  const dx =
-    source && target ? target.position.x - source.position.x : 0;
-  const dy =
-    source && target ? target.position.y - source.position.y : 1;
-  const useHorizontal =
-    !hierarchy && Math.abs(dx) > Math.abs(dy) * 1.15;
-  const handles = hierarchy
-    ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
-    : useHorizontal
-      ? dx >= 0
-        ? { sourceHandle: "right-source", targetHandle: "left-target" }
-        : { sourceHandle: "left-source", targetHandle: "right-target" }
-      : dy >= 0
-        ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
-        : { sourceHandle: "top-source", targetHandle: "bottom-target" };
+  const routing = getRelationRouting(
+    edge,
+    source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+    target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+  );
+  const handles = routing.handles;
 
   return {
     id: edge.id,
@@ -626,11 +1007,44 @@ function buildEdge(
     target: edge.targetId,
     ...handles,
     label:
-      showRelationLabel && secondary && (contextual || relationMode !== "structure")
+      !routeOptions &&
+      showRelationLabel &&
+      secondary &&
+      (contextual || relationMode !== "structure")
         ? relationKindLabel(edge)
         : undefined,
-    type: "smoothstep",
+    type: secondary && routeOptions ? "movableRelationEdge" : "smoothstep",
+    pathOptions: {
+      offset: routing.pathOffset,
+      borderRadius: routing.borderRadius,
+    },
     interactionWidth: 30,
+    data:
+      secondary && routeOptions
+        ? {
+            displayLabel: showRelationLabel ? relationKindLabel(edge) : "",
+            selected: routeOptions.selectedEdgeId === edge.id,
+            editable: routeOptions.editable,
+            route: routeOptions.routes[edge.id] ?? null,
+            defaultOrientation: defaultExternalRelationRoute(
+              edge,
+              source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+              target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+            ).orientation,
+            defaultOffset: defaultExternalRelationRoute(
+              edge,
+              source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+              target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+            ).offset,
+            pathOffset: routing.pathOffset,
+            borderRadius: routing.borderRadius,
+            strokeColor: stroke,
+            onSelect: routeOptions.onSelect,
+            onRouteChange: routeOptions.onRouteChange,
+            onRouteReset: routeOptions.onRouteReset,
+            onRouteCommit: routeOptions.onRouteCommit,
+          } satisfies MovableRelationEdgeData
+        : undefined,
     markerEnd: {
       type: MarkerType.ArrowClosed,
       color: hierarchy && mutedHierarchy ? "#6f8575" : stroke,
@@ -670,6 +1084,87 @@ function relationKindLabel(edge: Pick<OrgEdgeData, "type">) {
   return edge.type === "DECISION" ? "Integra" : "Colabora";
 }
 
+function stableHash(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function getRelationRouting(
+  edge: OrgEdgeData,
+  source: Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+  target: Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+) {
+  const sourceData = source?.data as OrgNodeData | undefined;
+  const targetData = target?.data as OrgNodeData | undefined;
+  const sourceX = source?.position.x ?? 0;
+  const targetX = target?.position.x ?? 0;
+  const sourceY = source?.position.y ?? 0;
+  const targetY = target?.position.y ?? 0;
+  const dx = targetX - sourceX;
+  const dy = targetY - sourceY;
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+
+  if (edge.type === "JERARQUICA") {
+    return {
+      handles:
+        sourceY <= targetY
+          ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
+          : { sourceHandle: "top-source", targetHandle: "bottom-target" },
+      pathOffset: 20,
+      borderRadius: 10,
+    };
+  }
+
+  const collective =
+    Boolean(sourceData && isCollectiveNode(sourceData)) ||
+    Boolean(targetData && isCollectiveNode(targetData));
+  const header =
+    Boolean(sourceData && isSectionHeader(sourceData)) ||
+    Boolean(targetData && isSectionHeader(targetData));
+  const sameSection =
+    Boolean(sourceData && targetData) &&
+    sectionForNode(sourceData!) === sectionForNode(targetData!);
+  const localRelation = sameSection;
+
+  // Relaciones cercanas: conexión corta por el lado natural, sin llevarlas
+  // a los corredores externos del organigrama.
+  if (localRelation) {
+    if (absDx >= absDy) {
+      return {
+        handles:
+          dx >= 0
+            ? { sourceHandle: "right-source", targetHandle: "left-target" }
+            : { sourceHandle: "left-source", targetHandle: "right-target" },
+        pathOffset: 18,
+        borderRadius: 12,
+      };
+    }
+    return {
+      handles:
+        dy >= 0
+          ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
+          : { sourceHandle: "top-source", targetHandle: "bottom-target" },
+      pathOffset: 18,
+      borderRadius: 12,
+    };
+  }
+
+  // Relaciones largas: comportamiento del organigrama original, por bandas
+  // exteriores y con tramos cortos de entrada/salida.
+  return {
+    handles: collective
+      ? { sourceHandle: "top-source", targetHandle: "top-target" }
+      : { sourceHandle: "bottom-source", targetHandle: "bottom-target" },
+    pathOffset: collective ? 28 : 24,
+    borderRadius: 14,
+  };
+}
+
+
 
 function StructuredInstitutionalCanvas({
   nodes,
@@ -681,6 +1176,11 @@ function StructuredInstitutionalCanvas({
   onNodeSelect,
   onNodeMove,
   onNodesMove,
+  selectedEdgeId,
+  edgeRoutes,
+  onEdgeRouteChange,
+  onEdgeRouteReset,
+  onEdgeRouteCommit,
   onEdgeSelect,
 }: {
   nodes: OrgNodeData[];
@@ -702,6 +1202,11 @@ function StructuredInstitutionalCanvas({
       positionY: number;
     }>,
   ) => void;
+  selectedEdgeId: string | null;
+  edgeRoutes: Record<string, ManualEdgeRoute>;
+  onEdgeRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
+  onEdgeRouteReset?: (edgeId: string) => void;
+  onEdgeRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
   onEdgeSelect?: (edgeId: string) => void;
 }) {
   const [relationScope, setRelationScope] = useState<RelationScope>("all");
@@ -1150,6 +1655,15 @@ function StructuredInstitutionalCanvas({
           selectedNodeId,
           renderedNodeById,
           true,
+          {
+            selectedEdgeId,
+            editable,
+            routes: edgeRoutes,
+            onSelect: onEdgeSelect,
+            onRouteChange: onEdgeRouteChange,
+            onRouteReset: onEdgeRouteReset,
+            onRouteCommit: onEdgeRouteCommit,
+          },
         ),
       );
     return [...hierarchyEdges, ...relations];
@@ -1165,6 +1679,13 @@ function StructuredInstitutionalCanvas({
     selectedNodeId,
     syntheticHierarchy,
     visibleRelations,
+    selectedEdgeId,
+    editable,
+    edgeRoutes,
+    onEdgeSelect,
+    onEdgeRouteChange,
+    onEdgeRouteReset,
+    onEdgeRouteCommit,
   ]);
 
   function handleNodeDragStart(
@@ -1347,6 +1868,7 @@ function StructuredInstitutionalCanvas({
           nodes={renderedNodes}
           edges={flowEdges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={editable ? handleNodesChange : undefined}
           onNodeDragStart={editable ? handleNodeDragStart : undefined}
           onNodeDragStop={editable ? handleNodeDragStop : undefined}
@@ -1396,6 +1918,15 @@ function buildMapEdge(
   selectedNodeId: string | null,
   nodeById: Map<string, Node<InstitutionalMapNodeData>>,
   showRelationLabel = true,
+  routeOptions?: {
+    selectedEdgeId: string | null;
+    editable: boolean;
+    routes: Record<string, ManualEdgeRoute>;
+    onSelect?: (edgeId: string) => void;
+    onRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
+    onRouteReset?: (edgeId: string) => void;
+    onRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
+  },
 ): Edge {
   const hierarchy = edge.type === "JERARQUICA";
   const contextual =
@@ -1406,18 +1937,12 @@ function buildMapEdge(
   const mutedHierarchy = relationMode !== "structure";
   const source = nodeById.get(edge.sourceId);
   const target = nodeById.get(edge.targetId);
-  const dx = source && target ? target.position.x - source.position.x : 0;
-  const dy = source && target ? target.position.y - source.position.y : 1;
-  const useHorizontal = !hierarchy && Math.abs(dx) > Math.abs(dy) * 1.15;
-  const handles = hierarchy
-    ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
-    : useHorizontal
-      ? dx >= 0
-        ? { sourceHandle: "right-source", targetHandle: "left-target" }
-        : { sourceHandle: "left-source", targetHandle: "right-target" }
-      : dy >= 0
-        ? { sourceHandle: "bottom-source", targetHandle: "top-target" }
-        : { sourceHandle: "top-source", targetHandle: "bottom-target" };
+  const routing = getRelationRouting(
+    edge,
+    source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+    target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+  );
+  const handles = routing.handles;
 
   return {
     id: edge.id,
@@ -1425,11 +1950,44 @@ function buildMapEdge(
     target: edge.targetId,
     ...handles,
     label:
-      showRelationLabel && secondary && (contextual || relationMode !== "structure")
+      !routeOptions &&
+      showRelationLabel &&
+      secondary &&
+      (contextual || relationMode !== "structure")
         ? relationKindLabel(edge)
         : undefined,
-    type: "smoothstep",
+    type: secondary && routeOptions ? "movableRelationEdge" : "smoothstep",
+    pathOptions: {
+      offset: routing.pathOffset,
+      borderRadius: routing.borderRadius,
+    },
     interactionWidth: 30,
+    data:
+      secondary && routeOptions
+        ? {
+            displayLabel: showRelationLabel ? relationKindLabel(edge) : "",
+            selected: routeOptions.selectedEdgeId === edge.id,
+            editable: routeOptions.editable,
+            route: routeOptions.routes[edge.id] ?? null,
+            defaultOrientation: defaultExternalRelationRoute(
+              edge,
+              source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+              target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+            ).orientation,
+            defaultOffset: defaultExternalRelationRoute(
+              edge,
+              source as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+              target as Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
+            ).offset,
+            pathOffset: routing.pathOffset,
+            borderRadius: routing.borderRadius,
+            strokeColor: stroke,
+            onSelect: routeOptions.onSelect,
+            onRouteChange: routeOptions.onRouteChange,
+            onRouteReset: routeOptions.onRouteReset,
+            onRouteCommit: routeOptions.onRouteCommit,
+          } satisfies MovableRelationEdgeData
+        : undefined,
     markerEnd: {
       type: MarkerType.ArrowClosed,
       color: hierarchy && mutedHierarchy ? "#6f8575" : stroke,
@@ -1869,6 +2427,7 @@ function InstitutionalOrgChartCanvas({
   nodes,
   edges,
   schoolSlug,
+  orgChartId,
   orgChartTitle,
   editable = false,
   selectedNodeId: controlledSelectedNodeId,
@@ -1877,10 +2436,73 @@ function InstitutionalOrgChartCanvas({
   onNodeMove,
   onNodesMove,
   onEdgeSelect,
+  onEdgeRouteCommit,
 }: Props) {
   const [canvasViewMode, setCanvasViewMode] = useState<CanvasViewMode>("institutional");
   const [activeSection, setActiveSection] = useState<SectionKey>("overview");
   const [relationMode, setRelationMode] = useState<RelationMode>("all");
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const routeSignature = useMemo(
+    () =>
+      edges
+        .map((edge) =>
+          `${edge.id}:${edge.routeOrientation ?? ""}:${edge.routeOffset ?? ""}`,
+        )
+        .sort()
+        .join("|"),
+    [edges],
+  );
+  const routesFromEdges = useMemo(() => {
+    const routes: Record<string, ManualEdgeRoute> = {};
+    for (const edge of edges) {
+      if (
+        (edge.routeOrientation === "horizontal" || edge.routeOrientation === "vertical") &&
+        typeof edge.routeOffset === "number"
+      ) {
+        routes[edge.id] = {
+          orientation: edge.routeOrientation,
+          offset: edge.routeOffset,
+        };
+      }
+    }
+    return routes;
+  }, [routeSignature]);
+  const [edgeRoutes, setEdgeRoutes] = useState<Record<string, ManualEdgeRoute>>(
+    () => routesFromEdges,
+  );
+
+  useEffect(() => {
+    setEdgeRoutes((current) => ({ ...routesFromEdges, ...current }));
+  }, [routesFromEdges]);
+
+  function selectEdge(edgeId: string) {
+    setSelectedEdgeId(edgeId);
+    onEdgeSelect?.(edgeId);
+  }
+
+  function changeEdgeRoute(edgeId: string, patch: Partial<ManualEdgeRoute>) {
+    setEdgeRoutes((current) => ({
+      ...current,
+      [edgeId]: {
+        orientation: current[edgeId]?.orientation ?? "horizontal",
+        offset: current[edgeId]?.offset ?? 0,
+        ...patch,
+      },
+    }));
+  }
+
+  function resetEdgeRoute(edgeId: string) {
+    setEdgeRoutes((current) => {
+      const next = { ...current };
+      delete next[edgeId];
+      return next;
+    });
+  }
+
+  function commitEdgeRoute(edgeId: string, route: ManualEdgeRoute | null) {
+    onEdgeRouteCommit?.(edgeId, route);
+  }
+
   const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(
     null,
   );
@@ -1893,6 +2515,7 @@ function InstitutionalOrgChartCanvas({
     if (controlledSelectedNodeId === undefined) {
       setInternalSelectedNodeId(nodeId);
     }
+    setSelectedEdgeId(null);
     onNodeSelect?.(nodeId);
   }
 
@@ -2356,7 +2979,24 @@ function InstitutionalOrgChartCanvas({
         if (edge.type === "JERARQUICA") return true;
         return relationMode !== "structure" && visibleRelationIds.has(edge.id);
       })
-      .map((edge) => buildEdge(edge, relationMode, selectedNodeId, flowNodeById));
+      .map((edge) =>
+        buildEdge(
+          edge,
+          relationMode,
+          selectedNodeId,
+          flowNodeById,
+          true,
+          {
+            selectedEdgeId,
+            editable,
+            routes: edgeRoutes,
+            onSelect: selectEdge,
+            onRouteChange: changeEdgeRoute,
+            onRouteReset: resetEdgeRoute,
+            onRouteCommit: commitEdgeRoute,
+          },
+        ),
+      );
   }, [
     edges,
     flowNodeById,
@@ -2364,6 +3004,10 @@ function InstitutionalOrgChartCanvas({
     relationMode,
     selectedNodeId,
     visibleRelations,
+    selectedEdgeId,
+    editable,
+    edgeRoutes,
+    onEdgeRouteCommit,
   ]);
 
   function openSection(section: Exclude<SectionKey, "overview">) {
@@ -2528,7 +3172,12 @@ function InstitutionalOrgChartCanvas({
           onNodeSelect={selectNode}
           onNodeMove={onNodeMove}
           onNodesMove={onNodesMove}
-          onEdgeSelect={onEdgeSelect}
+          selectedEdgeId={selectedEdgeId}
+          edgeRoutes={edgeRoutes}
+          onEdgeRouteChange={changeEdgeRoute}
+          onEdgeRouteReset={resetEdgeRoute}
+          onEdgeRouteCommit={commitEdgeRoute}
+          onEdgeSelect={selectEdge}
         />
       ) : activeSection === "overview" ? (
         <InstitutionalOverview
@@ -2634,6 +3283,7 @@ function InstitutionalOrgChartCanvas({
               nodes={renderedNodes}
               edges={flowEdges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               onNodesChange={editable ? handleFlowNodesChange : undefined}
               onNodeDragStart={editable ? handleNodeDragStart : undefined}
               onNodeDragStop={editable ? handleNodeDragStop : undefined}
@@ -2646,7 +3296,7 @@ function InstitutionalOrgChartCanvas({
               nodesConnectable={false}
               elementsSelectable
               onNodeClick={(_, node) => selectNode(node.id)}
-              onEdgeClick={(_, edge) => onEdgeSelect?.(edge.id)}
+              onEdgeClick={(_, edge) => selectEdge(edge.id)}
               onPaneClick={() => selectNode(null)}
             >
               <Background
@@ -3221,6 +3871,7 @@ export function OrgChartCanvas({
   nodes,
   edges,
   schoolSlug,
+  orgChartId,
   orgChartTitle,
   designMode,
   editable,
@@ -3252,6 +3903,7 @@ export function OrgChartCanvas({
       nodes={nodes}
       edges={edges}
       schoolSlug={schoolSlug}
+      orgChartId={orgChartId}
       orgChartTitle={orgChartTitle}
       designMode="institutional"
       editable={editable}
