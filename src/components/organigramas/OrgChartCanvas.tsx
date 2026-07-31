@@ -8,6 +8,7 @@ import {
   EdgeLabelRenderer,
   Handle,
   MarkerType,
+  Panel,
   Position,
   ReactFlow,
   applyNodeChanges,
@@ -77,6 +78,7 @@ type Props = {
   editable?: boolean;
   selectedNodeId?: string | null;
   hideDetailDrawer?: boolean;
+  cameraMode?: "default" | "focus";
   onNodeSelect?: (nodeId: string | null) => void;
   onNodeMove?: (input: { nodeId: string; positionX: number; positionY: number }) => void;
   onNodesMove?: (positions: Array<{ nodeId: string; positionX: number; positionY: number }>) => void;
@@ -913,6 +915,61 @@ const edgeTypes = {
   movableRelationEdge: MovableRelationEdge,
 };
 
+function InstitutionalCameraTools({
+  enabled,
+  selectedNodeId,
+  onViewAll,
+}: {
+  enabled: boolean;
+  selectedNodeId: string | null;
+  onViewAll: () => void;
+}) {
+  const { fitView, getNode, setCenter } = useReactFlow();
+
+  useEffect(() => {
+    if (!enabled || !selectedNodeId) return;
+
+    const timeout = window.setTimeout(() => {
+      const node = getNode(selectedNodeId);
+      if (!node) return;
+
+      const width = node.width ?? 190;
+      const height = node.height ?? 90;
+      void setCenter(
+        node.position.x + width / 2,
+        node.position.y + height / 2,
+        { zoom: 0.82, duration: 650 },
+      );
+    }, 40);
+
+    return () => window.clearTimeout(timeout);
+  }, [enabled, getNode, selectedNodeId, setCenter]);
+
+  if (!enabled) return null;
+
+  return (
+    <Panel position="top-left" className="!m-4">
+      <button
+        type="button"
+        onClick={() => {
+          onViewAll();
+          window.setTimeout(() => {
+            void fitView({
+              duration: 650,
+              padding: 0.06,
+              minZoom: 0.04,
+              maxZoom: 0.72,
+            });
+          }, 0);
+        }}
+        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-blue-700 shadow-md transition hover:border-blue-300 hover:bg-blue-50"
+      >
+        Ver todo
+      </button>
+    </Panel>
+  );
+}
+
 function defaultExternalRelationRoute(
   edge: OrgEdgeData,
   source: Node<{ data?: unknown } & { [key: string]: unknown }> | undefined,
@@ -1178,6 +1235,7 @@ function StructuredInstitutionalCanvas({
   onEdgeRouteReset,
   onEdgeRouteCommit,
   onEdgeSelect,
+  cameraMode,
 }: {
   nodes: OrgNodeData[];
   edges: OrgEdgeData[];
@@ -1204,6 +1262,7 @@ function StructuredInstitutionalCanvas({
   onEdgeRouteReset?: (edgeId: string) => void;
   onEdgeRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
   onEdgeSelect?: (edgeId: string) => void;
+  cameraMode?: "default" | "focus";
 }) {
   const [relationScope, setRelationScope] = useState<RelationScope>("all");
   const draggingNodeIdRef = useRef<string | null>(null);
@@ -1882,6 +1941,11 @@ function StructuredInstitutionalCanvas({
           }
           onPaneClick={() => onNodeSelect(null)}
         >
+          <InstitutionalCameraTools
+            enabled={cameraMode === "focus"}
+            selectedNodeId={selectedNodeId}
+            onViewAll={() => onNodeSelect(null)}
+          />
           <Background
             variant={BackgroundVariant.Dots}
             gap={24}
@@ -2424,6 +2488,7 @@ function InstitutionalOrgChartCanvas({
   editable = false,
   selectedNodeId: controlledSelectedNodeId,
   hideDetailDrawer = false,
+  cameraMode = "default",
   onNodeSelect,
   onNodeMove,
   onNodesMove,
@@ -3170,6 +3235,7 @@ function InstitutionalOrgChartCanvas({
           onEdgeRouteReset={resetEdgeRoute}
           onEdgeRouteCommit={commitEdgeRoute}
           onEdgeSelect={selectEdge}
+          cameraMode={cameraMode}
         />
       ) : activeSection === "overview" ? (
         <InstitutionalOverview
@@ -3869,6 +3935,7 @@ export function OrgChartCanvas({
   editable,
   selectedNodeId,
   hideDetailDrawer,
+  cameraMode,
   onNodeSelect,
   onNodeMove,
   onNodesMove,
@@ -3901,6 +3968,7 @@ export function OrgChartCanvas({
       editable={editable}
       selectedNodeId={selectedNodeId}
       hideDetailDrawer={hideDetailDrawer}
+      cameraMode={cameraMode}
       onNodeSelect={onNodeSelect}
       onNodeMove={onNodeMove}
       onNodesMove={onNodesMove}
