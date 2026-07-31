@@ -120,7 +120,6 @@ type MovableRelationEdgeData = {
   borderRadius: number;
   onSelect?: (edgeId: string) => void;
   strokeColor: string;
-  dimmed?: boolean;
   onRouteChange?: (edgeId: string, patch: Partial<ManualEdgeRoute>) => void;
   onRouteReset?: (edgeId: string) => void;
   onRouteCommit?: (edgeId: string, route: ManualEdgeRoute | null) => void;
@@ -771,7 +770,6 @@ function MovableRelationEdge({
           style={{
             transform: `translate(-50%, -50%) translate(${sourceX}px, ${sourceY}px)`,
             backgroundColor: data?.strokeColor ?? "#64748b",
-            opacity: data?.dimmed ? 0.12 : 1,
           }}
           aria-hidden="true"
         />
@@ -782,7 +780,6 @@ function MovableRelationEdge({
           style={{
             transform: `translate(-50%, -50%) translate(${targetX}px, ${targetY}px)`,
             color: data?.strokeColor ?? "#64748b",
-            opacity: data?.dimmed ? 0.12 : 1,
           }}
           aria-hidden="true"
         >
@@ -955,7 +952,8 @@ function InstitutionalCameraTools({
 
       const selectedData = selectedNode.data as InstitutionalMapNodeData;
 
-      // Las barras azules enfocan toda el área, sin mover ni ocultar cajas.
+      // Una barra azul representa el área completa: se encuadra la sección sin
+      // cambiar posiciones, ocultar cajas ni recalcular el organigrama.
       if (selectedData.mapState?.kind === "section") {
         const selectedSection = sectionForNode(selectedData);
         const sectionNodes = getNodes().filter((candidate) => {
@@ -981,6 +979,7 @@ function InstitutionalCameraTools({
         }
       }
 
+      // Una caja común conserva el enfoque individual estable.
       const width = selectedNode.width ?? 190;
       const height = selectedNode.height ?? 90;
       void setCenter(
@@ -1000,6 +999,8 @@ function InstitutionalCameraTools({
     setCenter,
   ]);
 
+  if (!enabled) return null;
+
   const hasSelection = Boolean(selectedNodeId);
   const canReturnToArea = Boolean(
     areaNodeId && selectedNodeId && areaNodeId !== selectedNodeId,
@@ -1013,498 +1014,107 @@ function InstitutionalCameraTools({
     selectedSiblingIndex >= 0 && selectedSiblingIndex < siblingNodeIds.length - 1
       ? siblingNodeIds[selectedSiblingIndex + 1]
       : null;
-  const firstChildId = childNodeIds[0] ?? null;
-
-  // Navegación simple con teclado: arriba/abajo sigue la jerarquía y
-  // izquierda/derecha recorre funciones hermanas del mismo nivel.
-  useEffect(() => {
-    if (!enabled || !selectedNodeId) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-
-      let nextNodeId: string | null = null;
-
-      if (event.key === "ArrowUp") nextNodeId = parentNodeId;
-      if (event.key === "ArrowDown") nextNodeId = firstChildId;
-      if (event.key === "ArrowLeft") nextNodeId = previousSiblingId;
-      if (event.key === "ArrowRight") nextNodeId = nextSiblingId;
-
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onViewAll();
-        window.setTimeout(() => {
-          void fitView({
-            duration: 650,
-            padding: 0.06,
-            minZoom: 0.04,
-            maxZoom: 0.72,
-          });
-        }, 0);
-        return;
-      }
-
-      if (!nextNodeId) return;
-      event.preventDefault();
-      onSelectNode(nextNodeId);
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    enabled,
-    firstChildId,
-    fitView,
-    nextSiblingId,
-    onSelectNode,
-    onViewAll,
-    parentNodeId,
-    previousSiblingId,
-    selectedNodeId,
-  ]);
-
-  if (!enabled) return null;
 
   return (
     <Panel position="top-left" className="!m-4">
-      <div className="max-w-[calc(100vw-7rem)] rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-lg backdrop-blur">
-        <div className="flex flex-wrap items-center gap-2">
-          {hasSelection && parentNodeId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(parentNodeId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-            >
-              ↑ Superior
-            </button>
-          ) : null}
-
-          {hasSelection && firstChildId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(firstChildId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-              title={
-                childNodeIds.length > 1
-                  ? `Baja al primer dependiente. Después usá ← y → para recorrer los ${childNodeIds.length}.`
-                  : "Baja al dependiente directo."
-              }
-            >
-              ↓ Bajar
-              {childNodeIds.length > 1 ? ` · ${childNodeIds.length}` : ""}
-            </button>
-          ) : null}
-
-          {hasSelection && previousSiblingId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(previousSiblingId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-              title="Anterior del mismo nivel"
-            >
-              ← Anterior
-            </button>
-          ) : null}
-
-          {hasSelection && nextSiblingId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(nextSiblingId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-              title="Siguiente del mismo nivel"
-            >
-              Siguiente →
-            </button>
-          ) : null}
-
-          {hasSelection && canReturnToArea ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(areaNodeId)}
-              className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
-            >
-              Volver al área
-            </button>
-          ) : null}
-
-          {hasSelection ? (
-            <button
-              type="button"
-              onClick={onOpenDetail}
-              className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
-            >
-              Ver detalle
-            </button>
-          ) : null}
-
+      <div className="flex max-w-[calc(100vw-7rem)] flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-lg backdrop-blur">
+        {hasSelection && parentNodeId ? (
           <button
             type="button"
-            onClick={() => {
-              onViewAll();
-              window.setTimeout(() => {
-                void fitView({
-                  duration: 650,
-                  padding: 0.06,
-                  minZoom: 0.04,
-                  maxZoom: 0.72,
-                });
-              }, 0);
-            }}
-            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-slate-700"
+            onClick={() => onSelectNode(parentNodeId)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
           >
-            Ver todo
+            ↑ Subir al superior
           </button>
-        </div>
+        ) : null}
+
+        {hasSelection && childNodeIds.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(childNodeIds[0])}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            ↓ {childNodeIds.length === 1 ? "Ir al hijo" : `Ir al primer hijo · ${childNodeIds.length}`}
+          </button>
+        ) : null}
+
+        {hasSelection && previousSiblingId ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(previousSiblingId)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            ← Anterior del mismo nivel
+          </button>
+        ) : null}
+
+        {hasSelection && nextSiblingId ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(nextSiblingId)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+          >
+            Siguiente del mismo nivel →
+          </button>
+        ) : null}
+
+        {hasSelection && integrationNodeIds.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(integrationNodeIds[0])}
+            className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-black text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+          >
+            Integra · ir a {integrationNodeIds.length === 1 ? "1 vínculo" : `${integrationNodeIds.length} vínculos`}
+          </button>
+        ) : null}
+
+        {hasSelection && collaborationNodeIds.length > 0 ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(collaborationNodeIds[0])}
+            className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+          >
+            Colabora · ir a {collaborationNodeIds.length === 1 ? "1 vínculo" : `${collaborationNodeIds.length} vínculos`}
+          </button>
+        ) : null}
+
+        {hasSelection && canReturnToArea ? (
+          <button
+            type="button"
+            onClick={() => onSelectNode(areaNodeId)}
+            className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+          >
+            Volver al área
+          </button>
+        ) : null}
 
         {hasSelection ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-            <span className="text-[0.65rem] font-bold text-slate-400">
-              Teclado: ↑ superior · ↓ bajar · ← → mismo nivel · Esc ver todo
-            </span>
-
-            {integrationNodeIds.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => onSelectNode(integrationNodeIds[0])}
-                className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[0.68rem] font-black text-rose-700 transition hover:bg-rose-100"
-                title="Ir al primer vínculo de integración"
-              >
-                Integra · {integrationNodeIds.length}
-              </button>
-            ) : null}
-
-            {collaborationNodeIds.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => onSelectNode(collaborationNodeIds[0])}
-                className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[0.68rem] font-black text-blue-700 transition hover:bg-blue-100"
-                title="Ir al primer vínculo de colaboración"
-              >
-                Colabora · {collaborationNodeIds.length}
-              </button>
-            ) : null}
-          </div>
-        ) : (
-          <p className="px-1 py-0.5 text-[0.68rem] font-bold text-slate-500">
-            Tocá una caja para recorrer el organigrama.
-          </p>
-        )}
-      </div>
-    </Panel>
-  );
-}
-
-
-function ProgressiveExploreTools({
-  enabled,
-  stage,
-  selectedNodeId,
-  visibleNodeIds,
-  focusNodeIds,
-  parentNodeId,
-  childNodeIds,
-  siblingNodeIds,
-  integrationNodeIds,
-  collaborationNodeIds,
-  areaNodeId,
-  canOpenSelectedArea,
-  onSelectNode,
-  onOpenSelectedArea,
-  onOpenDetail,
-  onRestart,
-}: {
-  enabled: boolean;
-  stage: 0 | 1 | 2 | 3;
-  selectedNodeId: string | null;
-  visibleNodeIds: string[];
-  focusNodeIds: string[];
-  parentNodeId: string | null;
-  childNodeIds: string[];
-  siblingNodeIds: string[];
-  integrationNodeIds: string[];
-  collaborationNodeIds: string[];
-  areaNodeId: string | null;
-  canOpenSelectedArea: boolean;
-  onSelectNode: (nodeId: string) => void;
-  onOpenSelectedArea: () => void;
-  onOpenDetail: () => void;
-  onRestart: () => void;
-}) {
-  const { fitView, getNode, setCenter } = useReactFlow();
-  const visibleSignature = visibleNodeIds.join("|");
-  const focusSignature = focusNodeIds.join("|");
-
-  // Cuando cambia una etapa o se abre un área, la cámara encuadra el contenido
-  // recién revelado. Una caja común se trata aparte para acercarse a ella.
-  useEffect(() => {
-    if (!enabled || visibleNodeIds.length === 0) return;
-
-    const selectedFlowNode = selectedNodeId ? getNode(selectedNodeId) : null;
-    const selectedData = selectedFlowNode?.data as
-      | InstitutionalMapNodeData
-      | undefined;
-    const selectedIsRegularNode =
-      stage >= 3 &&
-      Boolean(selectedFlowNode) &&
-      selectedData?.mapState?.kind !== "section";
-
-    if (selectedIsRegularNode) return;
-
-    const timeout = window.setTimeout(() => {
-      const ids = focusNodeIds.length > 0 ? focusNodeIds : visibleNodeIds;
-      void fitView({
-        nodes: ids.map((id) => ({ id })),
-        duration: 650,
-        padding: stage >= 3 ? 0.16 : 0.24,
-        minZoom: 0.08,
-        maxZoom: stage >= 3 ? 0.82 : 0.92,
-      });
-    }, 70);
-
-    return () => window.clearTimeout(timeout);
-  }, [
-    enabled,
-    fitView,
-    focusSignature,
-    getNode,
-    selectedNodeId,
-    stage,
-    visibleSignature,
-  ]);
-
-  // Al tocar una función concreta, el zoom se centra de verdad en esa caja.
-  useEffect(() => {
-    if (!enabled || !selectedNodeId || stage < 3) return;
-
-    const timeout = window.setTimeout(() => {
-      const selectedNode = getNode(selectedNodeId);
-      if (!selectedNode) return;
-      const selectedData = selectedNode.data as InstitutionalMapNodeData;
-      if (selectedData.mapState?.kind === "section") return;
-
-      const width = selectedNode.width ?? 190;
-      const height = selectedNode.height ?? 90;
-      void setCenter(
-        selectedNode.position.x + width / 2,
-        selectedNode.position.y + height / 2,
-        { zoom: 0.9, duration: 580 },
-      );
-    }, 55);
-
-    return () => window.clearTimeout(timeout);
-  }, [enabled, getNode, selectedNodeId, setCenter, stage]);
-
-  const visibleSet = useMemo(() => new Set(visibleNodeIds), [visibleSignature]);
-  const visibleParentId =
-    parentNodeId && visibleSet.has(parentNodeId) ? parentNodeId : null;
-  const visibleChildren = childNodeIds.filter((id) => visibleSet.has(id));
-  const visibleSiblings = siblingNodeIds.filter((id) => visibleSet.has(id));
-  const visibleIntegrations = integrationNodeIds.filter((id) => visibleSet.has(id));
-  const visibleCollaborations = collaborationNodeIds.filter((id) =>
-    visibleSet.has(id),
-  );
-  const visibleAreaId = areaNodeId && visibleSet.has(areaNodeId) ? areaNodeId : null;
-  const selectedSiblingIndex = selectedNodeId
-    ? visibleSiblings.indexOf(selectedNodeId)
-    : -1;
-  const previousSiblingId =
-    selectedSiblingIndex > 0 ? visibleSiblings[selectedSiblingIndex - 1] : null;
-  const nextSiblingId =
-    selectedSiblingIndex >= 0 &&
-    selectedSiblingIndex < visibleSiblings.length - 1
-      ? visibleSiblings[selectedSiblingIndex + 1]
-      : null;
-  const firstChildId = visibleChildren[0] ?? null;
-  const canReturnToArea = Boolean(
-    visibleAreaId &&
-      selectedNodeId &&
-      visibleAreaId !== selectedNodeId &&
-      !canOpenSelectedArea,
-  );
-
-  useEffect(() => {
-    if (!enabled || !selectedNodeId || stage < 3) return;
-
-    function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target instanceof HTMLSelectElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-
-      let nextNodeId: string | null = null;
-      if (event.key === "ArrowUp") nextNodeId = visibleParentId;
-      if (event.key === "ArrowDown") nextNodeId = firstChildId;
-      if (event.key === "ArrowLeft") nextNodeId = previousSiblingId;
-      if (event.key === "ArrowRight") nextNodeId = nextSiblingId;
-
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onRestart();
-        return;
-      }
-
-      if (!nextNodeId) return;
-      event.preventDefault();
-      onSelectNode(nextNodeId);
-    }
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [
-    enabled,
-    firstChildId,
-    nextSiblingId,
-    onRestart,
-    onSelectNode,
-    previousSiblingId,
-    selectedNodeId,
-    stage,
-    visibleParentId,
-  ]);
-
-  if (!enabled) return null;
-
-  const instruction =
-    stage === 0
-      ? "1. Tocá Dirección General para comenzar."
-      : stage === 1
-        ? "2. Tocá Consejo de Dirección para ver las áreas."
-        : stage === 2
-          ? "3. Tocá una barra azul para abrir esa área."
-          : selectedNodeId
-            ? "La caja elegida, su jerarquía y sus vínculos directos quedan destacados."
-            : "Abrí un área y elegí una caja para recorrer su estructura y sus vínculos.";
-
-  return (
-    <Panel position="top-left" className="!m-4">
-      <div className="max-w-[min(720px,calc(100vw-7rem))] rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur">
-        <p className="text-xs font-black text-slate-900">{instruction}</p>
-
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          {stage >= 3 && selectedNodeId && visibleParentId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(visibleParentId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-            >
-              ↑ Superior
-            </button>
-          ) : null}
-
-          {stage >= 3 && selectedNodeId && firstChildId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(firstChildId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-              title={
-                visibleChildren.length > 1
-                  ? "Baja al primer dependiente; después recorré sus hermanos."
-                  : "Baja al dependiente directo."
-              }
-            >
-              ↓ Bajar{visibleChildren.length > 1 ? ` · ${visibleChildren.length}` : ""}
-            </button>
-          ) : null}
-
-          {stage >= 3 && selectedNodeId && previousSiblingId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(previousSiblingId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-            >
-              ← Anterior
-            </button>
-          ) : null}
-
-          {stage >= 3 && selectedNodeId && nextSiblingId ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(nextSiblingId)}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-            >
-              Siguiente →
-            </button>
-          ) : null}
-
-          {canOpenSelectedArea ? (
-            <button
-              type="button"
-              onClick={onOpenSelectedArea}
-              className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:bg-blue-100"
-            >
-              Abrir su área completa
-            </button>
-          ) : null}
-
-          {stage >= 3 && selectedNodeId && canReturnToArea ? (
-            <button
-              type="button"
-              onClick={() => onSelectNode(visibleAreaId!)}
-              className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 transition hover:bg-blue-100"
-            >
-              Volver al área
-            </button>
-          ) : null}
-
-          {selectedNodeId ? (
-            <button
-              type="button"
-              onClick={onOpenDetail}
-              className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 transition hover:bg-violet-100"
-            >
-              Ver detalle
-            </button>
-          ) : null}
-
           <button
             type="button"
-            onClick={onRestart}
-            className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-slate-700"
+            onClick={onOpenDetail}
+            className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-700 transition hover:border-violet-300 hover:bg-violet-100"
           >
-            Reiniciar recorrido
+            Ver detalle
           </button>
-        </div>
-
-        {stage >= 3 && selectedNodeId ? (
-          <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-2">
-            <span className="text-[0.64rem] font-bold text-slate-400">
-              Rueda: zoom · arrastrar fondo: mover cámara · flechas: recorrer
-            </span>
-
-            {visibleIntegrations.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => onSelectNode(visibleIntegrations[0])}
-                className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[0.68rem] font-black text-rose-700 transition hover:bg-rose-100"
-              >
-                Integra · {visibleIntegrations.length}
-              </button>
-            ) : null}
-
-            {visibleCollaborations.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => onSelectNode(visibleCollaborations[0])}
-                className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[0.68rem] font-black text-blue-700 transition hover:bg-blue-100"
-              >
-                Colabora · {visibleCollaborations.length}
-              </button>
-            ) : null}
-          </div>
         ) : null}
+
+        <button
+          type="button"
+          onClick={() => {
+            onViewAll();
+            window.setTimeout(() => {
+              void fitView({
+                duration: 650,
+                padding: 0.06,
+                minZoom: 0.04,
+                maxZoom: 0.72,
+              });
+            }, 0);
+          }}
+          className="rounded-xl bg-slate-900 px-3 py-2 text-xs font-black text-white shadow-sm transition hover:bg-slate-700"
+        >
+          Ver todo
+        </button>
       </div>
     </Panel>
   );
@@ -1806,11 +1416,9 @@ function StructuredInstitutionalCanvas({
   cameraMode?: "default" | "focus";
   onOpenDetail?: () => void;
 }) {
-  const [relationScope, setRelationScope] = useState<RelationScope>("all");
-  const [progressiveStage, setProgressiveStage] = useState<0 | 1 | 2 | 3>(0);
-  const [openedSections, setOpenedSections] = useState<
-    Set<Exclude<SectionKey, "overview">>
-  >(() => new Set());
+  const [relationScope, setRelationScope] = useState<RelationScope>(() =>
+    cameraMode === "focus" ? "focus" : "all",
+  );
   const draggingNodeIdRef = useRef<string | null>(null);
   const nodeById = useMemo(
     () => new Map(nodes.map((node) => [node.id, node])),
@@ -2001,192 +1609,42 @@ function StructuredInstitutionalCanvas({
     };
   }, [autoLayout, nodes, storedInstitutionalLayout]);
 
-  const progressiveVisibility = useMemo(() => {
-    const visibleNodeIds = new Set<string>();
-    const openedNodeIds = new Set<string>();
-    const relatedPeekNodeIds = new Set<string>();
-
-    if (cameraMode !== "focus") {
-      return {
-        visibleNodeIds,
-        openedNodeIds,
-        relatedPeekNodeIds,
-        relations: [] as OrgEdgeData[],
-      };
-    }
-
-    const root = director ?? council ?? nodes[0] ?? null;
-    if (root) visibleNodeIds.add(root.id);
-
-    if (progressiveStage >= 1 && council) visibleNodeIds.add(council.id);
-
-    if (progressiveStage >= 2) {
-      for (const header of layout.sectionHeaderByKey.values()) {
-        visibleNodeIds.add(header.id);
-      }
-    }
-
-    for (const section of openedSections) {
-      for (const node of nodesBySection.get(section) ?? []) {
-        visibleNodeIds.add(node.id);
-        openedNodeIds.add(node.id);
-      }
-    }
-
-    const relations = edges.filter((edge) => {
-      if (edge.type === "JERARQUICA") return false;
-      return openedNodeIds.has(edge.sourceId) || openedNodeIds.has(edge.targetId);
-    });
-
-    for (const edge of relations) {
-      if (!openedNodeIds.has(edge.sourceId)) relatedPeekNodeIds.add(edge.sourceId);
-      if (!openedNodeIds.has(edge.targetId)) relatedPeekNodeIds.add(edge.targetId);
-    }
-
-    for (const nodeId of relatedPeekNodeIds) visibleNodeIds.add(nodeId);
-
-    return {
-      visibleNodeIds,
-      openedNodeIds,
-      relatedPeekNodeIds,
-      relations,
-    };
-  }, [
-    cameraMode,
-    council,
-    director,
-    edges,
-    layout.sectionHeaderByKey,
-    nodes,
-    nodesBySection,
-    openedSections,
-    progressiveStage,
-  ]);
-
-  const progressiveVisibleSignature = useMemo(
-    () => [...progressiveVisibility.visibleNodeIds].sort().join("|"),
-    [progressiveVisibility.visibleNodeIds],
-  );
-
-  const progressiveFocusNodeIds = useMemo(() => {
-    if (cameraMode !== "focus") return [] as string[];
-
-    if (progressiveStage < 3) {
-      return [...progressiveVisibility.visibleNodeIds];
-    }
-
-    const selectedSection = selectedNode ? sectionForNode(selectedNode) : null;
-    const sectionIsOpened =
-      selectedSection !== null &&
-      selectedSection !== "governance" &&
-      openedSections.has(selectedSection);
-
-    if (sectionIsOpened) {
-      const ids = new Set<string>();
-      for (const node of nodesBySection.get(selectedSection) ?? []) ids.add(node.id);
-      for (const relation of progressiveVisibility.relations) {
-        if (ids.has(relation.sourceId)) ids.add(relation.targetId);
-        if (ids.has(relation.targetId)) ids.add(relation.sourceId);
-      }
-      return [...ids].filter((id) => progressiveVisibility.visibleNodeIds.has(id));
-    }
-
-    return selectedNodeId ? [selectedNodeId] : [...progressiveVisibility.visibleNodeIds];
-  }, [
-    cameraMode,
-    nodesBySection,
-    openedSections,
-    progressiveStage,
-    progressiveVisibility.relations,
-    progressiveVisibleSignature,
-    selectedNode,
-    selectedNodeId,
-  ]);
-
-  function openProgressiveSection(section: Exclude<SectionKey, "overview">) {
-    setOpenedSections((current) => {
-      if (current.has(section)) return current;
-      const next = new Set(current);
-      next.add(section);
-      return next;
-    });
-    setProgressiveStage(3);
-    const header = layout.sectionHeaderByKey.get(section);
-    onNodeSelect(header?.id ?? null);
-  }
-
-  function handleProgressiveNodeClick(nodeId: string) {
-    if (cameraMode !== "focus") {
-      onNodeSelect(nodeId);
-      return;
-    }
-
-    const node = nodeById.get(nodeId);
-    if (!node) return;
-
-    const root = director ?? council ?? nodes[0] ?? null;
-    if (progressiveStage === 0 && root?.id === nodeId) {
-      setProgressiveStage(council && council.id !== root.id ? 1 : 2);
-      onNodeSelect(nodeId);
-      return;
-    }
-
-    if (progressiveStage <= 1 && council?.id === nodeId) {
-      setProgressiveStage(2);
-      onNodeSelect(nodeId);
-      return;
-    }
-
-    if (isSectionHeader(node)) {
-      const section = sectionForNode(node);
-      if (section !== "governance") openProgressiveSection(section);
-      return;
-    }
-
-    onNodeSelect(nodeId);
-  }
-
-  function restartProgressiveExplore() {
-    setProgressiveStage(0);
-    setOpenedSections(new Set());
-    setRelationScope("all");
-    onNodeSelect(null);
-  }
-
-  const selectedProgressiveSection = selectedNode
-    ? sectionForNode(selectedNode)
-    : null;
-  const canOpenSelectedProgressiveArea = Boolean(
-    cameraMode === "focus" &&
-      selectedProgressiveSection &&
-      selectedProgressiveSection !== "governance" &&
-      !openedSections.has(selectedProgressiveSection),
-  );
-
   // Los cables pueden estar todos visibles, pero el resaltado siempre es
   // contextual a la caja seleccionada. Antes, con "Todos los cables", se
   // resaltaban los extremos de TODAS las relaciones y parecía que brillaba
   // todo el organigrama.
   const selectedRelations = useMemo(() => {
     if (!selectedNodeId) return [];
-    return edges.filter(
-      (edge) =>
-        edge.type !== "JERARQUICA" &&
-        (edge.sourceId === selectedNodeId || edge.targetId === selectedNodeId),
-    );
-  }, [edges, selectedNodeId]);
+
+    return edges.filter((edge) => {
+      if (edge.type === "JERARQUICA") return false;
+      if (edge.sourceId !== selectedNodeId && edge.targetId !== selectedNodeId) {
+        return false;
+      }
+
+      // En Explorar, Integra y Colabora son parte permanente del contexto de
+      // la caja seleccionada cuando se usa Estructura o Todas. Los filtros
+      // específicos siguen permitiendo aislar únicamente uno de los dos tipos.
+      if (cameraMode === "focus" && relationMode === "structure") return true;
+      return relationMode !== "structure" && relationMatchesMode(edge, relationMode);
+    });
+  }, [cameraMode, edges, relationMode, selectedNodeId]);
 
   const visibleRelations = useMemo(() => {
-    if (cameraMode === "focus") return progressiveVisibility.relations;
+    if (cameraMode === "focus" && selectedNodeId) {
+      if (relationScope === "focus" || relationMode === "structure") {
+        return selectedRelations;
+      }
+    }
     if (relationMode === "structure") return [];
     if (relationScope === "focus") return selectedRelations;
     return edges.filter((edge) => relationMatchesMode(edge, relationMode));
   }, [
     cameraMode,
     edges,
-    progressiveVisibility.relations,
     relationMode,
     relationScope,
+    selectedNodeId,
     selectedRelations,
   ]);
 
@@ -2376,12 +1834,7 @@ function StructuredInstitutionalCanvas({
   const baseFlowNodes = useMemo<Node<InstitutionalMapNodeData>[]>(
     () =>
       nodes
-        .filter(
-          (node) =>
-            layout.positions.has(node.id) &&
-            (cameraMode !== "focus" ||
-              progressiveVisibility.visibleNodeIds.has(node.id)),
-        )
+        .filter((node) => layout.positions.has(node.id))
         .map((node) => ({
           id: node.id,
           type: "institutionalMapNode",
@@ -2392,33 +1845,24 @@ function StructuredInstitutionalCanvas({
               kind: layout.kinds.get(node.id) ?? "regular",
               width: layout.widths.get(node.id) ?? 190,
               dimmed:
-                cameraMode === "focus"
-                  ? cameraHierarchyContext.active && Boolean(selectedNodeId)
+                cameraFocusedSection !== null
+                  ? sectionForNode(node) !== cameraFocusedSection &&
+                    sectionForNode(node) !== "governance"
+                  : cameraHierarchyContext.active
                     ? !cameraHierarchyContext.contextNodeIds.has(node.id)
-                    : false
-                  : cameraFocusedSection !== null
-                    ? sectionForNode(node) !== cameraFocusedSection &&
-                      sectionForNode(node) !== "governance"
-                    : cameraHierarchyContext.active
-                      ? !cameraHierarchyContext.contextNodeIds.has(node.id)
-                      : relationScope === "focus" &&
-                        Boolean(selectedNodeId) &&
-                        relationMode !== "structure" &&
-                        highlightedNodeIds.size > 1 &&
-                        !highlightedNodeIds.has(node.id),
+                    : relationScope === "focus" &&
+                      Boolean(selectedNodeId) &&
+                      relationMode !== "structure" &&
+                      highlightedNodeIds.size > 1 &&
+                      !highlightedNodeIds.has(node.id),
               emphasized:
-                cameraMode === "focus"
-                  ? Boolean(selectedNodeId) &&
-                    (node.id === selectedNodeId ||
-                      (cameraHierarchyContext.active &&
-                        cameraHierarchyContext.contextNodeIds.has(node.id)))
-                  : cameraHierarchyContext.active &&
-                      node.id !== selectedNodeId &&
-                      cameraHierarchyContext.contextNodeIds.has(node.id)
-                    ? true
-                    : Boolean(selectedNodeId) &&
-                      node.id !== selectedNodeId &&
-                      highlightedNodeIds.has(node.id),
+                cameraHierarchyContext.active &&
+                node.id !== selectedNodeId &&
+                cameraHierarchyContext.contextNodeIds.has(node.id)
+                  ? true
+                  : Boolean(selectedNodeId) &&
+                    node.id !== selectedNodeId &&
+                    highlightedNodeIds.has(node.id),
               editable,
             },
           },
@@ -2431,13 +1875,11 @@ function StructuredInstitutionalCanvas({
     [
       cameraFocusedSection,
       cameraHierarchyContext,
-      cameraMode,
       editable,
       highlightedNodeIds,
       layout,
       nodes,
       relationMode,
-      progressiveVisibleSignature,
       relationScope,
       selectedNodeId,
     ],
@@ -2572,54 +2014,15 @@ function StructuredInstitutionalCanvas({
       return sectionForNode(sourceNode) === sectionForNode(targetNode);
     });
 
-    function applyProgressiveEdgeFocus(edge: OrgEdgeData, builtEdge: Edge) {
-      if (cameraMode !== "focus" || !selectedNodeId) return builtEdge;
-
-      const direct =
-        edge.sourceId === selectedNodeId || edge.targetId === selectedNodeId;
-
-      return {
-        ...builtEdge,
-        data: builtEdge.data
-          ? {
-              ...builtEdge.data,
-              displayLabel: direct
-                ? (builtEdge.data as { displayLabel?: string }).displayLabel ?? ""
-                : "",
-              dimmed: !direct,
-            }
-          : builtEdge.data,
-        style: {
-          ...(builtEdge.style ?? {}),
-          opacity: direct ? 1 : 0.14,
-          strokeWidth: direct
-            ? edge.type === "JERARQUICA"
-              ? 2.8
-              : 3.2
-            : 1.15,
-        },
-        animated: direct && edge.type !== "JERARQUICA",
-      } satisfies Edge;
-    }
-
-    const hierarchyEdges = [...syntheticHierarchy, ...hierarchy]
-      .filter(
-        (edge) =>
-          renderedNodeById.has(edge.sourceId) &&
-          renderedNodeById.has(edge.targetId),
-      )
-      .map((edge) =>
-        applyProgressiveEdgeFocus(
-          edge,
-          buildMapEdge(
-            edge,
-            relationMode,
-            selectedNodeId,
-            renderedNodeById,
-            false,
-          ),
-        ),
-      );
+    const hierarchyEdges = [...syntheticHierarchy, ...hierarchy].map((edge) =>
+      buildMapEdge(
+        edge,
+        relationMode,
+        selectedNodeId,
+        renderedNodeById,
+        false,
+      ),
+    );
 
     if (
       relationMode === "structure" &&
@@ -2634,24 +2037,21 @@ function StructuredInstitutionalCanvas({
           renderedNodeById.has(edge.targetId),
       )
       .map((edge) =>
-        applyProgressiveEdgeFocus(
+        buildMapEdge(
           edge,
-          buildMapEdge(
-            edge,
-            relationMode,
-            selectedNodeId,
-            renderedNodeById,
-            true,
-            {
-              selectedEdgeId,
-              editable,
-              routes: edgeRoutes,
-              onSelect: onEdgeSelect,
-              onRouteChange: onEdgeRouteChange,
-              onRouteReset: onEdgeRouteReset,
-              onRouteCommit: onEdgeRouteCommit,
-            },
-          ),
+          relationMode,
+          selectedNodeId,
+          renderedNodeById,
+          true,
+          {
+            selectedEdgeId,
+            editable,
+            routes: edgeRoutes,
+            onSelect: onEdgeSelect,
+            onRouteChange: onEdgeRouteChange,
+            onRouteReset: onEdgeRouteReset,
+            onRouteCommit: onEdgeRouteCommit,
+          },
         ),
       );
     return [...hierarchyEdges, ...relations];
@@ -2786,8 +2186,7 @@ function StructuredInstitutionalCanvas({
               : "Dirección General y Consejo arriba, las cinco áreas en una misma línea y todo el organigrama debajo, como en el esquema original."}
           </p>
         </div>
-        {cameraMode !== "focus" ? (
-          <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex max-w-full items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1">
             <SlidersHorizontal className="ml-2 h-3.5 w-3.5 shrink-0 text-slate-400" />
             {relationOptions.map((option) => (
@@ -2795,10 +2194,7 @@ function StructuredInstitutionalCanvas({
                 key={option.key}
                 type="button"
                 title={option.description}
-                onClick={() => {
-                  onRelationModeChange(option.key);
-                  if (!selectedNodeId) setRelationScope("all");
-                }}
+                onClick={() => onRelationModeChange(option.key)}
                 className={`shrink-0 rounded-lg px-3 py-2 text-[0.72rem] font-black transition ${
                   relationMode === option.key
                     ? "bg-slate-900 text-white shadow-sm"
@@ -2824,21 +2220,11 @@ function StructuredInstitutionalCanvas({
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  if (selectedNodeId) setRelationScope("focus");
-                }}
-                disabled={!selectedNodeId}
-                title={
-                  selectedNodeId
-                    ? "Mostrar únicamente las relaciones de la caja elegida"
-                    : "Seleccioná una caja para usar Solo selección"
-                }
+                onClick={() => setRelationScope("focus")}
                 className={`rounded-lg px-3 py-2 text-[0.7rem] font-black transition ${
-                  relationScope === "focus" && selectedNodeId
+                  relationScope === "focus"
                     ? "bg-blue-50 text-blue-700"
-                    : selectedNodeId
-                      ? "text-slate-500 hover:bg-slate-50"
-                      : "cursor-not-allowed text-slate-300"
+                    : "text-slate-500 hover:bg-slate-50"
                 }`}
               >
                 Solo selección
@@ -2846,11 +2232,6 @@ function StructuredInstitutionalCanvas({
             </div>
           ) : null}
         </div>
-        ) : (
-          <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-[0.72rem] font-black text-blue-800">
-            Recorrido progresivo · Integra y Colabora aparecen al abrir cada área
-          </div>
-        )}
       </div>
 
       {editable && !storedInstitutionalLayout ? (
@@ -2863,7 +2244,7 @@ function StructuredInstitutionalCanvas({
         </div>
       ) : null}
 
-      {cameraMode !== "focus" && relationScope === "focus" && relationMode !== "structure" ? (
+      {relationScope === "focus" && relationMode !== "structure" ? (
         <div className="border-b border-blue-100 bg-white px-4 py-2.5 text-xs font-semibold text-blue-900 sm:px-6">
           {selectedNode
             ? `${relationModeCopy}: mostrando únicamente los vínculos directos de “${selectedNode.title}”.`
@@ -2871,19 +2252,24 @@ function StructuredInstitutionalCanvas({
         </div>
       ) : null}
 
-      {cameraMode === "focus" ? (
+      {cameraMode === "focus" && cameraFocusedSection && selectedNode ? (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-100 bg-blue-50/70 px-4 py-2.5 text-xs font-semibold text-blue-950 sm:px-6">
           <span>
-            {progressiveStage === 0
-              ? "Comenzá por Dirección General."
-              : progressiveStage === 1
-                ? "Ahora abrí el Consejo de Dirección."
-                : progressiveStage === 2
-                  ? "Elegí un área. Todavía no se muestran sus cargos ni sus vínculos."
-                  : `${openedSections.size} ${openedSections.size === 1 ? "área abierta" : "áreas abiertas"}. Los vínculos externos muestran solo la caja relacionada, no el área completa.`}
+            Área enfocada: <strong>{selectedNode.title}</strong>. Las demás áreas
+            quedan atenuadas, pero siguen en su posición original.
           </span>
           <span className="font-black text-blue-700">
-            Integra y Colabora se agregan automáticamente.
+            Usá “Ver todo” para regresar.
+          </span>
+        </div>
+      ) : cameraMode === "focus" && cameraHierarchyContext.active && selectedNode ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-100 bg-emerald-50/70 px-4 py-2.5 text-xs font-semibold text-emerald-950 sm:px-6">
+          <span>
+            En foco: <strong>{selectedNode.title}</strong>. Se mantienen destacados
+            su superior, sus hijos, su área y sus vínculos directos de Integra y Colabora.
+          </span>
+          <span className="font-black text-emerald-700">
+            {cameraHierarchyContext.parentNodeIds.length} superior · {cameraHierarchyContext.childNodeIds.length} dependientes
           </span>
         </div>
       ) : null}
@@ -2900,47 +2286,29 @@ function StructuredInstitutionalCanvas({
           fitView
           fitViewOptions={{ padding: 0.06, minZoom: 0.04, maxZoom: 0.72 }}
           minZoom={0.035}
-          maxZoom={1.35}
-          panOnScroll={cameraMode !== "focus"}
-          zoomOnScroll={cameraMode === "focus"}
-          zoomOnPinch
-          zoomOnDoubleClick={cameraMode === "focus"}
-          preventScrolling={cameraMode === "focus"}
+          maxZoom={1.25}
+          panOnScroll
           nodesDraggable={editable}
           nodesConnectable={false}
           elementsSelectable
-          onNodeClick={(_, node) => handleProgressiveNodeClick(node.id)}
+          onNodeClick={(_, node) => onNodeSelect(node.id)}
           onEdgeClick={
             onEdgeSelect ? (_, edge) => onEdgeSelect(edge.id) : undefined
           }
-          onPaneClick={() => {
-            if (cameraMode !== "focus") onNodeSelect(null);
-          }}
+          onPaneClick={() => onNodeSelect(null)}
         >
-          <ProgressiveExploreTools
+          <InstitutionalCameraTools
             enabled={cameraMode === "focus"}
-            stage={progressiveStage}
             selectedNodeId={selectedNodeId}
-            visibleNodeIds={[...progressiveVisibility.visibleNodeIds]}
-            focusNodeIds={progressiveFocusNodeIds}
             parentNodeId={cameraHierarchyContext.parentNodeIds[0] ?? null}
             childNodeIds={cameraHierarchyContext.childNodeIds}
             siblingNodeIds={cameraHierarchyContext.siblingNodeIds}
             integrationNodeIds={cameraHierarchyContext.integrationNodeIds}
             collaborationNodeIds={cameraHierarchyContext.collaborationNodeIds}
             areaNodeId={cameraHierarchyContext.areaNodeId}
-            canOpenSelectedArea={canOpenSelectedProgressiveArea}
-            onSelectNode={handleProgressiveNodeClick}
-            onOpenSelectedArea={() => {
-              if (
-                selectedProgressiveSection &&
-                selectedProgressiveSection !== "governance"
-              ) {
-                openProgressiveSection(selectedProgressiveSection);
-              }
-            }}
+            onSelectNode={onNodeSelect}
             onOpenDetail={() => onOpenDetail?.()}
-            onRestart={restartProgressiveExplore}
+            onViewAll={() => onNodeSelect(null)}
           />
           <Background
             variant={BackgroundVariant.Dots}

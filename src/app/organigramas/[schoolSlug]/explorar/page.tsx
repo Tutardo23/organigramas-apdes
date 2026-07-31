@@ -182,6 +182,7 @@ export default async function ExploreSchoolOrganigramaPage({
               orgChartId={currentChart.id}
               orgChartTitle={currentChart.title}
               cameraMode="focus"
+              detailMode="manual"
             />
           ) : (
             <div className="rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center">
