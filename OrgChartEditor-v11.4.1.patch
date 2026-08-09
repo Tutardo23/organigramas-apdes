@@ -1,0 +1,14 @@
+--- a/src/components/organigramas/OrgChartEditor.tsx
++++ b/src/components/organigramas/OrgChartEditor.tsx
+@@
+-        if (result.person) {
++        const savedPerson = result.person;
++        if (savedPerson) {
+           setPeople((current) =>
+-            current.some((person) => person.id === result.person.id)
++            current.some((person) => person.id === savedPerson.id)
+               ? current
+-              : [...current, result.person],
++              : [...current, savedPerson],
+           );
+         }

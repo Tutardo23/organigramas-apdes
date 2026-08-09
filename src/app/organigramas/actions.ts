@@ -3,7 +3,29 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "../../lib/prisma";
-import { getOrgSimplePreset } from "../../lib/org-simple-presets";
+import { institutionalTemplateNodes } from "../../lib/org-chart-template";
+
+const NODE_AREAS = [
+  "DIRECCION",
+  "ACADEMICA",
+  "FORMACION",
+  "FAMILIA",
+  "COMUNICACION",
+  "POSTULACIONES",
+  "OPERACIONES",
+  "ADMINISTRACION",
+  "TUTORIA",
+  "CAPELLANIA",
+  "OTRO",
+] as const;
+
+type NodeAreaValue = (typeof NODE_AREAS)[number];
+
+function safeArea(value: string): NodeAreaValue {
+  return NODE_AREAS.includes(value as NodeAreaValue)
+    ? (value as NodeAreaValue)
+    : "OTRO";
+}
 
 function slugify(value: string) {
   return value
@@ -19,18 +41,18 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
   const city = String(formData.get("city") ?? "").trim();
   const province = String(formData.get("province") ?? "").trim();
   const yearValue = Number(formData.get("year") ?? new Date().getFullYear());
-  const year = Number.isFinite(yearValue) ? Math.round(yearValue) : new Date().getFullYear();
-  const requestedMode = String(formData.get("startMode") ?? "simple");
-  const startMode = requestedMode === "empty" || requestedMode === "core" ? requestedMode : "simple";
+  const year = Number.isFinite(yearValue) ? yearValue : new Date().getFullYear();
+  const startMode = String(formData.get("startMode") ?? "template");
 
-  if (!name) throw new Error("El nombre del colegio es obligatorio.");
+  if (!name) {
+    throw new Error("El nombre del colegio es obligatorio.");
+  }
+
   const slug = slugify(name);
-  if (!slug) throw new Error("Ingresá un nombre de colegio válido.");
 
-  const school = await (prisma as any).school.upsert({
+  const school = await prisma.school.upsert({
     where: { slug },
     update: {
-      name,
       city: city || undefined,
       province: province || undefined,
     },
@@ -42,123 +64,55 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
     },
   });
 
-  const existingChart = await (prisma as any).orgChart.findFirst({
-    where: { schoolId: school.id, year },
-    orderBy: [{ version: "desc" }, { createdAt: "desc" }],
+  const existingChart = await prisma.orgChart.findFirst({
+    where: {
+      schoolId: school.id,
+      year,
+    },
   });
 
-  if (existingChart) {
-    redirect(`/organigramas/${school.slug}?organigrama=${existingChart.id}&modo=editar`);
-  }
-
-  const chart = await prisma.$transaction(async (tx) => {
-    const createdChart = await (tx as any).orgChart.create({
+  if (!existingChart) {
+    await prisma.orgChart.create({
       data: {
         schoolId: school.id,
         title: `Organigrama Institucional ${school.name} ${year}`,
         year,
-        version: 1,
         status: "DRAFT",
-        summary: "Organigrama institucional editable.",
+        nodes:
+          startMode === "empty"
+            ? undefined
+            : {
+                create: institutionalTemplateNodes.map((node, index) => ({
+                  title: node.title,
+                  area: safeArea(node.area),
+                  formalRole: node.formalRole,
+                  realFunction: node.realFunction,
+                  description: node.description,
+                  color: node.color,
+                  icon: node.icon,
+                  positionX: node.positionX,
+                  positionY: node.positionY,
+                  order: index + 1,
+                })),
+              },
       },
     });
-
-    if (startMode === "empty") return createdChart;
-
-    const council = await (tx as any).orgNode.create({
-      data: {
-        orgChartId: createdChart.id,
-        title: "Consejo de Dirección",
-        area: "DIRECCION",
-        formalRole: "Órgano de conducción institucional",
-        realFunction: "Conducción colegiada y definición de criterios",
-        description: "Define criterios, prioridades y acompaña la conducción general del colegio.",
-        color: "#1C3A62",
-        icon: "users",
-        positionX: 760,
-        positionY: 80,
-        order: 1,
-      },
-    });
-
-    const director = await (tx as any).orgNode.create({
-      data: {
-        orgChartId: createdChart.id,
-        title: "Dirección General",
-        area: "DIRECCION",
-        formalRole: "Dirección del colegio",
-        realFunction: "Conducción general",
-        description: "Conduce la vida institucional y articula las decisiones de los distintos equipos.",
-        color: "#2E6B4B",
-        icon: "landmark",
-        positionX: 760,
-        positionY: 470,
-        order: 2,
-      },
-    });
-
-    await (tx as any).orgEdge.create({
-      data: {
-        orgChartId: createdChart.id,
-        sourceId: council.id,
-        targetId: director.id,
-        type: "JERARQUICA",
-        label: null,
-      },
-    });
-
-    if (startMode === "core") {
-      const starterKeys = [
-        "nivel-inicial",
-        "nivel-primario",
-        "nivel-secundario",
-        "formacion-integral",
-        "familias",
-        "administracion",
-      ];
-      for (const [index, key] of starterKeys.entries()) {
-        const preset = getOrgSimplePreset(key);
-        if (!preset) continue;
-        const node = await (tx as any).orgNode.create({
-          data: {
-            orgChartId: createdChart.id,
-            title: preset.title,
-            area: preset.area,
-            formalRole: preset.formalRole,
-            realFunction: preset.realFunction,
-            description: preset.description,
-            color: preset.color,
-            icon: preset.icon,
-            positionX: 80 + index * 450,
-            positionY: 900,
-            order: index + 3,
-          },
-        });
-        await (tx as any).orgEdge.create({
-          data: {
-            orgChartId: createdChart.id,
-            sourceId: director.id,
-            targetId: node.id,
-            type: "JERARQUICA",
-            label: null,
-          },
-        });
-      }
-    }
-
-    return createdChart;
-  }, { maxWait: 10_000, timeout: 30_000 });
+  }
 
   revalidatePath("/");
   revalidatePath("/organigramas");
-  redirect(`/organigramas/${school.slug}?organigrama=${chart.id}&modo=editar`);
+  redirect(`/organigramas/${school.slug}/editar`);
 }
 
 export async function deleteSchoolAction(formData: FormData) {
   const schoolId = String(formData.get("schoolId") ?? "").trim();
-  if (!schoolId) throw new Error("No se pudo identificar el colegio para eliminar.");
 
-  await (prisma as any).school.delete({ where: { id: schoolId } });
+  if (!schoolId) {
+    throw new Error("No se pudo identificar el colegio para eliminar.");
+  }
+
+  await prisma.school.delete({ where: { id: schoolId } });
+
   revalidatePath("/");
   revalidatePath("/organigramas");
   redirect("/organigramas");

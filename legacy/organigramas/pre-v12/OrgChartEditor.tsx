@@ -88,8 +88,6 @@ type EditorEdgeData = {
   targetId: string;
   type: string;
   label: string | null;
-  routeOrientation?: "horizontal" | "vertical" | null;
-  routeOffset?: number | null;
 };
 
 type ReviewNoteData = {
@@ -1010,11 +1008,12 @@ function LegacyOrgChartEditor({
         const updatedNode = result.node as EditorNodeData;
         updateNodeInState(updatedNode);
         setDraft(nodeToDraft(updatedNode));
-        if (result.person) {
+        const savedPerson = result.person;
+        if (savedPerson) {
           setPeople((current) =>
-            current.some((person) => person.id === result.person.id)
+            current.some((person) => person.id === savedPerson.id)
               ? current
-              : [...current, result.person],
+              : [...current, savedPerson],
           );
         }
         showMessage("Caja guardada");

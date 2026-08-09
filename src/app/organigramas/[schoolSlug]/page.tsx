@@ -15,7 +15,10 @@ type PageProps = {
 
 export async function generateMetadata({ params }: PageProps) {
   const { schoolSlug } = await params;
-  const school = await prisma.school.findUnique({ where: { slug: schoolSlug } });
+  const school = await prisma.school.findUnique({
+    where: { slug: schoolSlug },
+    select: { name: true },
+  });
 
   if (!school) return { title: "Organigrama no encontrado" };
 
@@ -25,15 +28,22 @@ export async function generateMetadata({ params }: PageProps) {
   };
 }
 
-export default async function SchoolOrganigramaPage({ params, searchParams }: PageProps) {
+export default async function SchoolOrganigramaPage({
+  params,
+  searchParams,
+}: PageProps) {
   const { schoolSlug } = await params;
   const search = await searchParams;
+
   const requestedParam = search.organigrama;
-  const requestedId = Array.isArray(requestedParam) ? requestedParam[0] : requestedParam;
+  const requestedId = Array.isArray(requestedParam)
+    ? requestedParam[0]
+    : requestedParam;
+
   const modeParam = Array.isArray(search.modo) ? search.modo[0] : search.modo;
   const initialMode = modeParam === "editar" ? "edit" : "view";
 
-  const school = await (prisma as any).school.findUnique({
+  const school = await prisma.school.findUnique({
     where: { slug: schoolSlug },
     include: {
       people: {
@@ -57,9 +67,8 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
               },
             },
           },
-          // IMPORTANTE: cargamos TODAS las relaciones. La jerarquía se ve
-          // siempre y los vínculos Integra/Colabora solo aparecen al tocar
-          // una caja, evitando una telaraña permanente.
+          // Cargamos todas las relaciones. PucaraOrgChart decide cuáles mostrar
+          // según el foco y el toggle de flechas Integra/Colabora.
           edges: true,
         },
       },
@@ -69,11 +78,11 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
   if (!school) notFound();
 
   const currentChart =
-    school.orgCharts.find((chart: any) => chart.id === requestedId) ??
+    school.orgCharts.find((chart) => chart.id === requestedId) ??
     school.orgCharts[0] ??
     null;
 
-  const nodes = (currentChart?.nodes ?? []).map((node: any) => ({
+  const nodes = (currentChart?.nodes ?? []).map((node) => ({
     id: node.id,
     title: node.title,
     area: node.area,
@@ -84,11 +93,31 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
     positionX: node.positionX,
     positionY: node.positionY,
     color: node.color,
-    person: node.person,
-    members: node.members ?? [],
+    person: node.person
+      ? {
+          id: node.person.id,
+          firstName: node.person.firstName,
+          lastName: node.person.lastName,
+          email: node.person.email,
+          photoUrl: node.person.photoUrl,
+        }
+      : null,
+    members: node.members.map((member) => ({
+      id: member.id,
+      role: member.role,
+      roleTitle: member.roleTitle,
+      weeklyHours: member.weeklyHours,
+      person: {
+        id: member.person.id,
+        firstName: member.person.firstName,
+        lastName: member.person.lastName,
+        email: member.person.email,
+        photoUrl: member.person.photoUrl,
+      },
+    })),
   }));
 
-  const edges = (currentChart?.edges ?? []).map((edge: any) => {
+  const edges = (currentChart?.edges ?? []).map((edge) => {
     const stored = parseEdgeLabelStorage(edge.label);
     return {
       id: edge.id,
@@ -99,7 +128,7 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
     };
   });
 
-  const people = (school.people ?? []).map((person: any) => ({
+  const people = school.people.map((person) => ({
     id: person.id,
     firstName: person.firstName,
     lastName: person.lastName,
@@ -107,11 +136,11 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
     photoUrl: person.photoUrl,
   }));
 
-  const availableCharts = (school.orgCharts ?? []).map((chart: any) => ({
+  const availableCharts = school.orgCharts.map((chart) => ({
     id: chart.id,
     title: chart.title,
     year: chart.year,
-    version: chart.version ?? 1,
+    version: chart.version,
     status: chart.status,
   }));
 
@@ -121,7 +150,9 @@ export default async function SchoolOrganigramaPage({ params, searchParams }: Pa
       schoolName={school.name}
       schoolLogoUrl={school.logoUrl}
       orgChartId={currentChart?.id ?? ""}
-      orgChartTitle={currentChart?.title ?? "Todavía no hay un organigrama creado"}
+      orgChartTitle={
+        currentChart?.title ?? "Todavía no hay un organigrama creado"
+      }
       initialNodes={nodes}
       initialEdges={edges}
       existingPeople={people}

@@ -25,6 +25,7 @@ import {
   Wrench,
   type LucideIcon,
 } from "lucide-react";
+import { createElement } from "react";
 import { isCollectiveGovernanceNode } from "../../lib/org-chart-template";
 
 export type PersonPreview = {
@@ -325,7 +326,6 @@ export function OrgNodeCard({
   dimmed?: boolean;
 }) {
   const color = getNodeColor(data.color, data.area);
-  const Icon = getIcon(data.icon, data.area);
   const responsible = getResponsible(data);
   const responsibleName = formatPersonName(responsible);
   const memberCount = new Set([
@@ -356,7 +356,7 @@ export function OrgNodeCard({
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white shadow-sm"
             style={{ backgroundColor: color }}
           >
-            <Icon className="h-4 w-4" />
+            {createElement(getIcon(data.icon, data.area), { className: "h-4 w-4" })}
           </div>
 
           <div className="min-w-0 flex-1">
