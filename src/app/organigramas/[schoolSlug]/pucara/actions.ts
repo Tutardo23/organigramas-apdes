@@ -11,6 +11,7 @@ import { getOrgSimplePreset } from "../../../../lib/org-simple-presets";
 import {
   buildBuenAyreSimpleHierarchy,
   isBuenAyreSchoolSlug,
+  normalizeBuenAyreTitle,
 } from "../../../../lib/buen-ayre-simple-hierarchy";
 
 type PositionInput = {
@@ -74,6 +75,27 @@ function revalidateSchool(slug: string) {
   revalidatePath(`/organigramas/${slug}`);
   revalidatePath(`/organigramas/${slug}/pucara`);
   revalidatePath(`/organigramas/${slug}/editar`);
+}
+
+// Guardar decenas de posiciones dentro de una sola transacción de Prisma/Neon
+// hacía que Buen Ayre superara el timeout de 5 segundos (P2028). Para posiciones
+// visuales no necesitamos una transacción gigante: son escrituras idempotentes.
+// Las procesamos en lotes chicos para no saturar la conexión ni bloquear el commit.
+async function savePositionsInBatches(positions: PositionInput[], batchSize = 8) {
+  for (let index = 0; index < positions.length; index += batchSize) {
+    const batch = positions.slice(index, index + batchSize);
+    await Promise.all(
+      batch.map((position) =>
+        (prisma as any).orgNode.update({
+          where: { id: position.nodeId },
+          data: {
+            positionX: position.positionX,
+            positionY: position.positionY,
+          },
+        }),
+      ),
+    );
+  }
 }
 
 function normalizeNode(node: any) {
@@ -261,14 +283,7 @@ export async function savePucaraPositionsAction(input: {
     throw new Error("Hay cajas que no pertenecen a este colegio.");
   }
 
-  await prisma.$transaction(
-    input.positions.map((position) =>
-      (prisma as any).orgNode.update({
-        where: { id: position.nodeId },
-        data: { positionX: position.positionX, positionY: position.positionY },
-      }),
-    ),
-  );
+  await savePositionsInBatches(input.positions);
 
   revalidateSchool(input.schoolSlug);
   return { ok: true };
@@ -482,7 +497,7 @@ export async function reparentPucaraNodeAction(input: {
     throw new Error("Una caja no puede depender de sí misma.");
   }
 
-  const nodes = await (prisma as any).orgNode.findMany({
+  let nodes = await (prisma as any).orgNode.findMany({
     where: { orgChartId: input.orgChartId },
     select: { id: true },
   });
@@ -614,7 +629,7 @@ export async function normalizePucaraHierarchyAction(input: {
   orgChartId: string;
 }) {
   await assertChartBelongsToSchool(input.orgChartId, input.schoolSlug);
-  const nodes = await (prisma as any).orgNode.findMany({
+  let nodes = await (prisma as any).orgNode.findMany({
     where: { orgChartId: input.orgChartId },
     select: { id: true, title: true, area: true, positionX: true, positionY: true },
   });
@@ -628,6 +643,77 @@ export async function normalizePucaraHierarchyAction(input: {
   // de leer. Acá reemplazamos ÚNICAMENTE la jerarquía y conservamos todas las
   // relaciones transversales, personas, fotos y cajas.
   if (isBuenAyreSchoolSlug(input.schoolSlug)) {
+    // El organigrama institucional viejo de Buen Ayre tenía los Equipos
+    // Directivos de Inicial, Primaria y Secundaria dibujados al costado. Si
+    // alguno no llegó a la base nueva, lo recreamos UNA sola vez. Así cada
+    // nivel tiene una caja navegable por flechas y conserva luego sus vínculos
+    // Integra/Colabora como relaciones adicionales.
+    const teamDefinitions = [
+      {
+        level: "Inicial",
+        directionPatterns: [/^direccion de nivel inicial$/, /^direccion del nivel inicial$/, /^direccion nivel inicial$/],
+        teamPatterns: [/^equipo directivo.*inicial/, /^equipo de direccion.*inicial/, /^equipo de conduccion.*inicial/],
+      },
+      {
+        level: "Primario",
+        directionPatterns: [/^direccion de nivel primar/, /^direccion del nivel primar/, /^direccion nivel primar/],
+        teamPatterns: [/^equipo directivo.*primar/, /^equipo de direccion.*primar/, /^equipo de conduccion.*primar/],
+      },
+      {
+        level: "Secundario",
+        directionPatterns: [/^direccion de nivel secundar/, /^direccion del nivel secundar/, /^direccion nivel secundar/, /^rectoria.*secundar/],
+        teamPatterns: [/^equipo directivo.*secundar/, /^equipo de direccion.*secundar/, /^equipo de conduccion.*secundar/],
+      },
+    ] as const;
+
+    let nextOrder = await (prisma as any).orgNode.count({ where: { orgChartId: input.orgChartId } });
+    const createdTeamNodes: any[] = [];
+
+    for (const definition of teamDefinitions) {
+      const direction = nodes.find((node: any) => {
+        const title = normalizeBuenAyreTitle(node.title);
+        return definition.directionPatterns.some((pattern) => pattern.test(title));
+      });
+      const existingTeam = nodes.find((node: any) => {
+        const title = normalizeBuenAyreTitle(node.title);
+        return definition.teamPatterns.some((pattern) => pattern.test(title));
+      });
+
+      if (!direction || existingTeam) continue;
+
+      nextOrder += 1;
+      const created = await (prisma as any).orgNode.create({
+        data: {
+          orgChartId: input.orgChartId,
+          title: `Equipo Directivo Nivel ${definition.level}`,
+          area: "ACADEMICA",
+          formalRole: `Equipo directivo de Nivel ${definition.level}`,
+          realFunction: `Articula la conducción del Nivel ${definition.level} y acompaña a sus equipos.`,
+          description: `Equipo de conducción del Nivel ${definition.level}.`,
+          positionX: Number(direction.positionX) + 430,
+          positionY: Number(direction.positionY) + 180,
+          color: "#ef4444",
+          icon: "users",
+          order: nextOrder,
+        },
+        include: {
+          person: true,
+          members: {
+            include: { person: true },
+            orderBy: [{ role: "asc" }, { order: "asc" }],
+          },
+        },
+      });
+      nodes = [...nodes, {
+        id: created.id,
+        title: created.title,
+        area: created.area,
+        positionX: created.positionX,
+        positionY: created.positionY,
+      }];
+      createdTeamNodes.push(normalizeNode(created));
+    }
+
     const links = buildBuenAyreSimpleHierarchy(nodes);
     await prisma.$transaction(async (tx) => {
       await (tx as any).orgEdge.deleteMany({
@@ -652,7 +738,7 @@ export async function normalizePucaraHierarchyAction(input: {
     });
 
     revalidateSchool(input.schoolSlug);
-    return { created: hierarchyEdges.length, rebuilt: true, hierarchyEdges };
+    return { created: hierarchyEdges.length, rebuilt: true, hierarchyEdges, createdTeamNodes };
   }
 
   const hierarchy = await (prisma as any).orgEdge.findMany({

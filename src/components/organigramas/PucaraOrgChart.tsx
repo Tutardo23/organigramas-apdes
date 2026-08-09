@@ -6,6 +6,7 @@ import {
   BackgroundVariant,
   Controls,
   Handle,
+  MarkerType,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -162,7 +163,9 @@ function fullName(person?: Person | null) {
 
 function photoSource(person?: Person | null) {
   if (!person) return null;
-  return person.photoUrl?.trim() || `/images/personas/${person.id}.jpg`;
+  // No adivinamos un archivo por ID: si no hay foto cargada, mostramos el avatar.
+  // Así evitamos cientos de 404 como /images/personas/demo-person-*.jpg.
+  return person.photoUrl?.trim() || null;
 }
 
 function peopleForNode(node: SourceNode) {
@@ -340,19 +343,20 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
   const isCollective = people.length > 1;
   const relationStyle =
     data.relationHighlight === "integration"
-      ? "border-red-300 ring-4 ring-red-200/80 shadow-red-100"
+      ? "scale-[1.035] border-red-500 ring-[8px] ring-red-300/65 shadow-2xl shadow-red-300/70"
       : data.relationHighlight === "collaboration"
-        ? "border-blue-300 ring-4 ring-blue-200/80 shadow-blue-100"
+        ? "scale-[1.035] border-blue-500 ring-[8px] ring-blue-300/65 shadow-2xl shadow-blue-300/70"
         : data.relationHighlight === "both"
-          ? "border-violet-300 ring-4 ring-violet-200/80 shadow-violet-100"
+          ? "scale-[1.035] border-violet-500 ring-[8px] ring-violet-300/65 shadow-2xl shadow-violet-300/70"
           : "border-slate-200 hover:-translate-y-0.5 hover:shadow-2xl";
 
   return (
     <div className="relative w-[380px]" style={{ minHeight: data.cardHeight }}>
       <Handle
+        id="hierarchy-target"
         type="target"
         position={Position.Top}
-        className="!z-30 !h-3.5 !w-3.5 !border-2 !border-white !bg-slate-400"
+        className="!h-1 !w-1 !border-0 !bg-transparent !opacity-0"
       />
 
       <div
@@ -364,7 +368,7 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
         style={{ minHeight: data.cardHeight }}
       >
         {data.relationHighlight ? (
-          <div className={`absolute right-3 top-3 z-20 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] shadow-sm ${
+          <div className={`absolute right-3 top-3 z-20 rounded-full border-2 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.12em] shadow-lg ${
             data.relationHighlight === "integration"
               ? "border-red-200 bg-red-50 text-red-700"
               : data.relationHighlight === "collaboration"
@@ -462,10 +466,19 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
         </button>
       </div>
 
+      {/* Handles laterales exclusivos para Integra / Colabora. Son invisibles,
+          pero hacen que el vínculo salga por el costado de una card y entre por
+          el costado de la otra, en lugar de mezclarse con la jerarquía. */}
+      <Handle id="relation-source-left" type="source" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0" />
+      <Handle id="relation-target-left" type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0" />
+      <Handle id="relation-source-right" type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0" />
+      <Handle id="relation-target-right" type="target" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-transparent !opacity-0" />
+
       <Handle
+        id="hierarchy-source"
         type="source"
         position={Position.Bottom}
-        className="!z-30 !h-3.5 !w-3.5 !border-2 !border-white !bg-slate-400"
+        className="!h-1 !w-1 !border-0 !bg-transparent !opacity-0"
       />
     </div>
   );
@@ -554,6 +567,203 @@ function autoLayout(
   });
 }
 
+
+function normalizedTitle(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[-_·–—]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isBuenAyreAreaRoot(node: SourceNode) {
+  const title = normalizedTitle(node.title);
+  return [
+    /^area academica$/,
+    /^area de orientacion$/,
+    /^area orientacion$/,
+    /^area de desarrollo institucional$/,
+    /^area desarrollo institucional$/,
+    /^area de administracion$/,
+    /^area administracion$/,
+    /^area de operaciones$/,
+    /^area operaciones$/,
+  ].some((pattern) => pattern.test(title));
+}
+
+/**
+ * Buen Ayre se ordena como un árbol limpio de arriba hacia abajo.
+ *
+ * La versión anterior intentaba empaquetar cinco subgrafos Dagre por separado.
+ * Eso podía generar ramas enormes, cruces y nodos visualmente desconectados si
+ * una dependencia histórica terminaba cruzando de un área a otra.
+ *
+ * Este layout calcula el ancho de CADA subárbol y coloca al padre centrado sobre
+ * todos sus hijos. De esta forma las dependencias jerárquicas quedan verticales,
+ * predecibles y sin recorridos laterales absurdos.
+ */
+function autoLayoutBuenAyre(nodes: SourceNode[], edges: SourceEdge[]) {
+  if (nodes.length <= 1) return nodes;
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const children = new Map<string, string[]>();
+  const parent = new Map<string, string>();
+
+  for (const edge of edges) {
+    if (!nodeById.has(edge.sourceId) || !nodeById.has(edge.targetId)) continue;
+    const list = children.get(edge.sourceId) ?? [];
+    if (!list.includes(edge.targetId)) list.push(edge.targetId);
+    children.set(edge.sourceId, list);
+    parent.set(edge.targetId, edge.sourceId);
+  }
+
+  const semanticOrder = (node: SourceNode) => {
+    const title = normalizedTitle(node.title);
+    const rules: Array<[RegExp, number]> = [
+      [/director general|direccion general/, 0],
+      [/consejo de direccion/, 1],
+      [/area academica/, 10],
+      [/area de orientacion|area orientacion/, 20],
+      [/area de desarrollo institucional|area desarrollo institucional/, 30],
+      [/area de administracion|area administracion/, 40],
+      [/area de operaciones|area operaciones/, 50],
+      [/nivel inicial/, 100],
+      [/nivel primar/, 110],
+      [/nivel secundar/, 120],
+      [/familia/, 200],
+      [/comunicacion/, 210],
+      [/postulaciones|admisiones/, 220],
+      [/administr/, 300],
+      [/operaciones|mantenimiento|limpieza|seguridad/, 310],
+    ];
+    for (const [pattern, value] of rules) if (pattern.test(title)) return value;
+    return 500;
+  };
+
+  for (const [id, list] of children) {
+    list.sort((a, b) => {
+      const na = nodeById.get(a)!;
+      const nb = nodeById.get(b)!;
+      return semanticOrder(na) - semanticOrder(nb)
+        || na.positionX - nb.positionX
+        || na.title.localeCompare(nb.title, "es");
+    });
+    children.set(id, list);
+  }
+
+  const roots = nodes
+    .filter((node) => !parent.has(node.id))
+    .sort((a, b) => semanticOrder(a) - semanticOrder(b) || a.positionX - b.positionX);
+  const rootsToPlace = roots.length ? roots : [nodes[0]];
+
+  const H_GAP = 78;
+  const V_GAP = 118;
+  const OUTER_MARGIN = 90;
+  const subtreeWidth = new Map<string, number>();
+  const visiting = new Set<string>();
+
+  const measure = (id: string): number => {
+    if (subtreeWidth.has(id)) return subtreeWidth.get(id)!;
+    if (visiting.has(id)) return NODE_WIDTH;
+    visiting.add(id);
+    const kids = (children.get(id) ?? []).filter((childId) => childId !== id);
+    const width = kids.length
+      ? Math.max(
+          NODE_WIDTH,
+          kids.reduce((sum, childId) => sum + measure(childId), 0) + H_GAP * Math.max(0, kids.length - 1),
+        )
+      : NODE_WIDTH;
+    visiting.delete(id);
+    subtreeWidth.set(id, width);
+    return width;
+  };
+
+  rootsToPlace.forEach((root) => measure(root.id));
+
+  // Altura máxima de cada nivel para que tarjetas con muchas personas nunca
+  // se pisen con el siguiente nivel.
+  const depthById = new Map<string, number>();
+  const depthQueue = rootsToPlace.map((node) => ({ id: node.id, depth: 0 }));
+  while (depthQueue.length) {
+    const item = depthQueue.shift()!;
+    if (depthById.has(item.id)) continue;
+    depthById.set(item.id, item.depth);
+    for (const childId of children.get(item.id) ?? []) {
+      depthQueue.push({ id: childId, depth: item.depth + 1 });
+    }
+  }
+
+  // Cualquier caja suelta queda en un nivel propio al final, en vez de cruzar
+  // ramas existentes.
+  const unresolved = nodes.filter((node) => !depthById.has(node.id));
+  const maxKnownDepth = Math.max(0, ...depthById.values());
+  unresolved.forEach((node) => depthById.set(node.id, maxKnownDepth + 1));
+
+  const maxHeightByDepth = new Map<number, number>();
+  for (const node of nodes) {
+    const d = depthById.get(node.id) ?? 0;
+    maxHeightByDepth.set(d, Math.max(maxHeightByDepth.get(d) ?? 0, cardHeightFor(node)));
+  }
+
+  const yByDepth = new Map<number, number>();
+  let yCursor = 70;
+  const deepest = Math.max(0, ...depthById.values());
+  for (let d = 0; d <= deepest; d += 1) {
+    yByDepth.set(d, yCursor);
+    yCursor += (maxHeightByDepth.get(d) ?? SIMPLE_NODE_HEIGHT) + V_GAP;
+  }
+
+  const positions = new Map<string, { x: number; y: number }>();
+  const placed = new Set<string>();
+
+  const placeSubtree = (id: string, left: number) => {
+    if (placed.has(id)) return;
+    const node = nodeById.get(id);
+    if (!node) return;
+    placed.add(id);
+
+    const width = subtreeWidth.get(id) ?? NODE_WIDTH;
+    const depthValue = depthById.get(id) ?? 0;
+    positions.set(id, {
+      x: left + width / 2 - NODE_WIDTH / 2,
+      y: yByDepth.get(depthValue) ?? 70,
+    });
+
+    const kids = (children.get(id) ?? []).filter((childId) => !placed.has(childId));
+    if (!kids.length) return;
+    const kidsWidth = kids.reduce((sum, childId) => sum + (subtreeWidth.get(childId) ?? NODE_WIDTH), 0)
+      + H_GAP * Math.max(0, kids.length - 1);
+    let childLeft = left + (width - kidsWidth) / 2;
+    for (const childId of kids) {
+      placeSubtree(childId, childLeft);
+      childLeft += (subtreeWidth.get(childId) ?? NODE_WIDTH) + H_GAP;
+    }
+  };
+
+  let rootLeft = OUTER_MARGIN;
+  for (const root of rootsToPlace) {
+    placeSubtree(root.id, rootLeft);
+    rootLeft += (subtreeWidth.get(root.id) ?? NODE_WIDTH) + 180;
+  }
+
+  // Cajas que quedaron fuera de la jerarquía: fila ordenada al final. No se
+  // mezclan dentro de ningún subárbol ni generan cruces inesperados.
+  let looseX = OUTER_MARGIN;
+  const looseY = yByDepth.get(maxKnownDepth + 1) ?? yCursor;
+  for (const node of unresolved) {
+    if (positions.has(node.id)) continue;
+    positions.set(node.id, { x: looseX, y: looseY });
+    looseX += NODE_WIDTH + H_GAP;
+  }
+
+  return nodes.map((node) => {
+    const position = positions.get(node.id);
+    return position ? { ...node, positionX: position.x, positionY: position.y } : node;
+  });
+}
+
 function ChartInner(props: Props) {
   const { fitView, setCenter } = useReactFlow();
   const [mode, setMode] = useState<Mode>(props.initialMode === "edit" ? "edit" : "view");
@@ -562,6 +772,9 @@ function ChartInner(props: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [relationFocusId, setRelationFocusId] = useState<string | null>(null);
+  // Los vínculos transversales se entienden primero por el brillo de las cards.
+  // Las flechas quedan apagadas por defecto y se pueden prender solo cuando haga falta.
+  const [showRelationArrows, setShowRelationArrows] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [peoplePanelNodeId, setPeoplePanelNodeId] = useState<string | null>(null);
   const [editorSection, setEditorSection] = useState<EditorSection>("function");
@@ -575,6 +788,7 @@ function ChartInner(props: Props) {
   const [directoryPeople, setDirectoryPeople] = useState<Person[]>(props.existingPeople);
   const pendingFitNodeRef = useRef<string | null>(null);
   const pendingNavigationFocusRef = useRef<string | null>(null);
+  const pendingRelationFitRef = useRef<string | null>(null);
   const isBuenAyre = isBuenAyreSchoolSlug(props.schoolSlug);
 
   const hierarchyEdges = useMemo(
@@ -654,6 +868,14 @@ function ChartInner(props: Props) {
   }, [mode, expanded, focusedId]);
 
   const openPeople = useCallback((nodeId: string) => setPeoplePanelNodeId(nodeId), []);
+
+  const toggleRelationArrows = useCallback(() => {
+    setShowRelationArrows((current) => {
+      const next = !current;
+      if (next && relationFocusId) pendingRelationFitRef.current = relationFocusId;
+      return next;
+    });
+  }, [relationFocusId]);
 
   const focusPersonInChart = useCallback((fromNodeId: string, personId: string) => {
     const principalTarget = sourceNodes.find(
@@ -752,43 +974,93 @@ function ChartInner(props: Props) {
   );
 
   const flowEdges = useMemo<Edge[]>(
-    () =>
-      sourceEdges.map((edge) => {
+    () => {
+      const positionById = new Map(sourceNodes.map((node) => [node.id, node]));
+      return sourceEdges.map((edge) => {
         const hierarchy = edge.type === "JERARQUICA";
         const directRelation =
           !hierarchy &&
           !!relationFocusId &&
           (edge.sourceId === relationFocusId || edge.targetId === relationFocusId);
         const integration = edge.type === "DECISION";
+        const relationColor = integration ? "#dc2626" : "#2563eb";
+        const hierarchyActive = hierarchy && !!selectedId && (edge.sourceId === selectedId || edge.targetId === selectedId);
+        const hierarchyColor = hierarchyActive ? "#2563eb" : "#334155";
+        const sourceNode = positionById.get(edge.sourceId);
+        const targetNode = positionById.get(edge.targetId);
+        const targetIsRight = sourceNode && targetNode ? targetNode.positionX >= sourceNode.positionX : true;
+
         return {
           id: edge.id,
           source: edge.sourceId,
           target: edge.targetId,
-          type: "smoothstep",
+          sourceHandle: hierarchy ? "hierarchy-source" : targetIsRight ? "relation-source-right" : "relation-source-left",
+          targetHandle: hierarchy ? "hierarchy-target" : targetIsRight ? "relation-target-left" : "relation-target-right",
+          type: hierarchy ? "smoothstep" : "default",
           hidden: hierarchy
             ? mode === "view"
               ? !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId)
               : false
-            : !directRelation || !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId),
-          interactionWidth: hierarchy ? 24 : 18,
+            // Integra / Colabora aparecen SOLO cuando una de las dos cajas está
+            // seleccionada. Así mantenemos el organigrama limpio, pero el vínculo
+            // se ve de verdad además del brillo de la caja relacionada.
+            : !showRelationArrows || !directRelation || !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId),
+          interactionWidth: hierarchy ? 28 : 24,
           animated: false,
+          // La jerarquía tiene prioridad visual. Integra/Colabora son secundarios.
+          zIndex: hierarchy ? (mode === "edit" ? 30 : 12) : 5,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: hierarchy ? hierarchyColor : relationColor,
+            width: hierarchy ? 22 : 14,
+            height: hierarchy ? 22 : 14,
+          },
+          label: !hierarchy && directRelation ? (integration ? "INTEGRA" : "COLABORA") : undefined,
+          labelStyle: !hierarchy ? { fill: relationColor, fontWeight: 900, fontSize: 11 } : undefined,
+          labelBgStyle: !hierarchy ? { fill: "#ffffff", fillOpacity: 0.98, stroke: relationColor, strokeWidth: 1 } : undefined,
+          labelBgPadding: !hierarchy ? [8, 5] : undefined,
+          labelBgBorderRadius: !hierarchy ? 999 : undefined,
           style: hierarchy
-            ? { stroke: "#475569", strokeWidth: 3.2, opacity: 1 }
-            : {
-                stroke: integration ? "#dc2626" : "#2563eb",
-                strokeWidth: 2.2,
-                opacity: 0.58,
-                strokeDasharray: "7 7",
-              },
+            ? { stroke: hierarchyColor, strokeWidth: hierarchyActive ? 4.4 : mode === "edit" ? 3.6 : 3.1, opacity: 1 }
+            : { stroke: relationColor, strokeWidth: 2.1, opacity: 0.58, strokeDasharray: integration ? "5 8" : "3 8" },
         };
-      }),
-    [sourceEdges, visibleIds, mode, relationFocusId],
+      });
+    },
+    [sourceEdges, sourceNodes, visibleIds, mode, relationFocusId, selectedId, showRelationArrows],
   );
 
   const hierarchyFlowEdges = useMemo(
     () => flowEdges.filter((flowEdge) => hierarchyEdges.some((edge) => edge.id === flowEdge.id)),
     [flowEdges, hierarchyEdges],
   );
+
+  useEffect(() => {
+    if (mode !== "view" || !showRelationArrows) return;
+    const sourceId = pendingRelationFitRef.current;
+    if (!sourceId || relationFocusId !== sourceId) return;
+
+    const relationIds = new Set<string>([sourceId]);
+    relationEdges.forEach((edge) => {
+      if (edge.sourceId === sourceId) relationIds.add(edge.targetId);
+      if (edge.targetId === sourceId) relationIds.add(edge.sourceId);
+    });
+    const relatedNodes = flowNodes.filter((node) => !node.hidden && relationIds.has(node.id));
+    if (relatedNodes.length <= 1) {
+      pendingRelationFitRef.current = null;
+      return;
+    }
+
+    pendingRelationFitRef.current = null;
+    const timer = window.setTimeout(() => {
+      void fitView({
+        nodes: relatedNodes,
+        padding: 0.28,
+        duration: 520,
+        maxZoom: 1.04,
+      });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [mode, showRelationArrows, relationFocusId, relationEdges, flowNodes, fitView]);
 
   useEffect(() => {
     if (mode !== "view") return;
@@ -850,13 +1122,16 @@ function ChartInner(props: Props) {
       if (record) pushHistory();
       setFocusedId(id);
       setRelationFocusId(id);
+      if (mode === "view" && showRelationArrows && relationEdges.some((edge) => edge.sourceId === id || edge.targetId === id)) {
+        pendingRelationFitRef.current = id;
+      }
       if (mode === "edit") setSelectedId(id);
       setCenter(node.position.x + NODE_WIDTH / 2, node.position.y + cardHeightFor(node.data) / 2, {
         zoom: mode === "edit" ? 0.92 : 1.08,
         duration: 500,
       });
     },
-    [flowNodes, mode, pushHistory, setCenter],
+    [flowNodes, mode, pushHistory, relationEdges, setCenter, showRelationArrows],
   );
 
   const onNodesChange = useCallback(
@@ -926,8 +1201,12 @@ function ChartInner(props: Props) {
   const navigation = useMemo(() => {
     if (!focusedFlowNode) return { parent: null, children: [], siblings: [], index: -1 };
     const parent = getIncomers(focusedFlowNode, flowNodes, hierarchyFlowEdges)[0] ?? null;
-    const children = getOutgoers(focusedFlowNode, flowNodes, hierarchyFlowEdges);
-    const siblings = parent ? getOutgoers(parent, flowNodes, hierarchyFlowEdges) : [];
+    const byVisualOrder = (a: Node<CardData>, b: Node<CardData>) =>
+      a.position.x - b.position.x || a.position.y - b.position.y || String(a.data.title).localeCompare(String(b.data.title), "es");
+    const children = getOutgoers(focusedFlowNode, flowNodes, hierarchyFlowEdges).slice().sort(byVisualOrder);
+    const siblings = parent
+      ? getOutgoers(parent, flowNodes, hierarchyFlowEdges).slice().sort(byVisualOrder)
+      : [];
     return { parent, children, siblings, index: siblings.findIndex((node) => node.id === focusedFlowNode.id) };
   }, [focusedFlowNode, flowNodes, hierarchyFlowEdges]);
 
@@ -1088,7 +1367,9 @@ function ChartInner(props: Props) {
 
   const autoOrderEditor = () => {
     const allIds = new Set(sourceNodes.map((node) => node.id));
-    const ordered = autoLayout(sourceNodes, hierarchyEdges, allIds, depth);
+    const ordered = isBuenAyre
+      ? autoLayoutBuenAyre(sourceNodes, hierarchyEdges)
+      : autoLayout(sourceNodes, hierarchyEdges, allIds, depth);
     setSourceNodes(ordered);
     window.setTimeout(() => fitView({ duration: 560, padding: 0.12, maxZoom: 0.78 }), 70);
     runAction(async () => {
@@ -1225,11 +1506,18 @@ function ChartInner(props: Props) {
       }));
       const transversal = sourceEdges.filter((edge) => edge.type !== "JERARQUICA");
       const nextEdges = [...rebuiltHierarchy, ...transversal];
-      const nextHierarchyInfo = buildDepthMap(sourceNodes, rebuiltHierarchy);
+      const createdTeams = ((result as any).createdTeamNodes ?? []) as SourceNode[];
+      const nextNodes = [
+        ...sourceNodes,
+        ...createdTeams.filter((team) => !sourceNodes.some((node) => node.id === team.id)),
+      ];
+      const nextHierarchyInfo = buildDepthMap(nextNodes, rebuiltHierarchy);
       const nextDepth = nextHierarchyInfo.depth;
-      const nextRootId = nextHierarchyInfo.roots[0] ?? sourceNodes[0]?.id ?? null;
-      const allIds = new Set(sourceNodes.map((node) => node.id));
-      const ordered = autoLayout(sourceNodes, rebuiltHierarchy, allIds, nextDepth);
+      const nextRootId = nextHierarchyInfo.roots[0] ?? nextNodes[0]?.id ?? null;
+      const allIds = new Set(nextNodes.map((node) => node.id));
+      const ordered = isBuenAyre
+        ? autoLayoutBuenAyre(nextNodes, rebuiltHierarchy)
+        : autoLayout(nextNodes, rebuiltHierarchy, allIds, nextDepth);
 
       await savePucaraPositionsAction({
         schoolSlug: props.schoolSlug,
@@ -1250,7 +1538,9 @@ function ChartInner(props: Props) {
       setMessage({
         type: "ok",
         text: result.rebuilt
-          ? "Buen Ayre quedó pasado a una jerarquía simple. Integra y Colabora se conservaron como vínculos adicionales."
+          ? createdTeams.length > 0
+            ? `Buen Ayre quedó reacomodado y se recuperaron ${createdTeams.length} ${createdTeams.length === 1 ? "Equipo Directivo" : "Equipos Directivos"} que faltaban. Integra y Colabora se conservaron.`
+            : "Buen Ayre quedó pasado a una jerarquía simple. Integra y Colabora se conservaron como vínculos adicionales."
           : result.created > 0
             ? `Se completaron ${result.created} dependencias y el organigrama quedó ordenado.`
             : "La jerarquía ya estaba completa; igual se volvió a ordenar el organigrama.",
@@ -1418,7 +1708,7 @@ function ChartInner(props: Props) {
               </button>
               {isBuenAyre ? (
                 <button type="button" onClick={completeMissingDependencies} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-black text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60">
-                  <LayoutGrid className="h-4 w-4" /> Pasar Buen Ayre al formato simple
+                  <LayoutGrid className="h-4 w-4" /> Reacomodar Buen Ayre
                 </button>
               ) : missingDependencyCount > 0 ? (
                 <button type="button" onClick={completeMissingDependencies} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-black text-amber-800 transition hover:bg-amber-100 disabled:opacity-60">
@@ -1439,7 +1729,7 @@ function ChartInner(props: Props) {
             </div>
             {isBuenAyre ? (
               <div className="border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-800 md:px-6">
-                Buen Ayre conserva todas sus cajas, personas, fotos e Integra/Colabora. “Pasar al formato simple” reemplaza solo la dependencia jerárquica por una estructura limpia y después la ordena automáticamente.
+                Buen Ayre conserva todas sus cajas, personas, fotos e Integra/Colabora. “Reacomodar Buen Ayre” reconstruye la dependencia directa y vuelve a agrupar las cinco áreas como en la vista institucional anterior.
               </div>
             ) : missingDependencyCount > 0 ? (
               <div className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800 md:px-6">
@@ -1497,6 +1787,27 @@ function ChartInner(props: Props) {
                 <SchoolLogo schoolSlug={props.schoolSlug} schoolName={props.schoolName} schoolLogoUrl={props.schoolLogoUrl} className="h-[68px] w-[68px] !border-0 !shadow-none" />
               </div>
             </ReactFlow>
+
+            {relationFocusId && focusedRelations.length > 0 ? (
+              <div className="absolute left-1/2 top-5 z-30 flex -translate-x-1/2 items-center gap-2 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur">
+                <div className="hidden px-2 text-xs font-black text-slate-500 sm:block">
+                  Vínculos: <span className="text-slate-950">{focusedRelations.length}</span> · brillo activo
+                </div>
+                <button
+                  type="button"
+                  onClick={toggleRelationArrows}
+                  className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition ${
+                    showRelationArrows
+                      ? "bg-slate-900 text-white shadow-sm hover:bg-slate-800"
+                      : "border border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:text-blue-700"
+                  }`}
+                  title={showRelationArrows ? "Ocultar flechas de Integra y Colabora" : "Mostrar flechas de Integra y Colabora"}
+                >
+                  <Link2 className="h-4 w-4" />
+                  {showRelationArrows ? "Ocultar flechas" : "Ver flechas"}
+                </button>
+              </div>
+            ) : null}
 
             {mode === "view" ? (
               <>
@@ -2049,7 +2360,20 @@ function CreateNodeModal({
                 <option value="" disabled>Elegir de quién depende</option>
                 {nodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}
               </select>
-              {parentNode ? <p className="mt-2 text-sm font-semibold text-blue-800">La nueva caja va a aparecer debajo de <strong>{parentNode.title}</strong>.</p> : null}
+              {parentNode ? (
+                <>
+                  <p className="mt-2 text-sm font-semibold text-blue-800">La nueva caja va a aparecer debajo de <strong>{parentNode.title}</strong>.</p>
+                  <div className="mt-4 flex flex-col items-center rounded-2xl border border-blue-100 bg-white p-4">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-center text-sm font-black text-slate-800">{parentNode.title}</div>
+                    <div className="my-1 flex h-10 flex-col items-center text-blue-700">
+                      <div className="h-5 w-0.5 bg-blue-400" />
+                      <ArrowDown className="-mt-1 h-5 w-5" />
+                    </div>
+                    <div className="rounded-xl border-2 border-dashed border-blue-300 bg-blue-50 px-4 py-2 text-center text-sm font-black text-blue-700">Nueva función</div>
+                    <p className="mt-2 text-[11px] font-semibold text-slate-400">Esta es la dependencia jerárquica que se va a crear.</p>
+                  </div>
+                </>
+              ) : null}
             </div>
             <div className="flex justify-end">
               <button type="button" disabled={!parentId} onClick={() => setStep(2)} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800 disabled:opacity-40">
@@ -2111,8 +2435,13 @@ function CreateNodeModal({
             )}
 
             {selectedPreset ? (
-              <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-                Se va a crear <strong>{selectedPreset.title}</strong> debajo de <strong>{parentNode?.title}</strong>. Después podés cambiar todo.
+              <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                <p className="text-sm font-semibold text-emerald-800">Se va a crear <strong>{selectedPreset.title}</strong> debajo de <strong>{parentNode?.title}</strong>. Después podés cambiar todo.</p>
+                <div className="mt-3 flex items-center justify-center gap-3 overflow-hidden rounded-xl bg-white p-3">
+                  <div className="max-w-[210px] truncate rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">{parentNode?.title}</div>
+                  <ArrowRight className="h-5 w-5 shrink-0 text-emerald-600" />
+                  <div className="max-w-[210px] truncate rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800">{selectedPreset.title}</div>
+                </div>
               </div>
             ) : null}
 

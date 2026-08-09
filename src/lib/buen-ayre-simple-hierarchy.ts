@@ -82,21 +82,50 @@ export function buildBuenAyreSimpleHierarchy(nodes: BuenAyreHierarchyNode[]) {
   const academicCouncil = firstMatch(nodes, [/^consejo academico$/]);
   assign(academicCouncil, areaAcademica ?? governmentParent);
 
-  const initialDirection = firstMatch(nodes, [/^direccion de nivel inicial$/, /^direccion del nivel inicial$/]);
-  const primaryDirection = firstMatch(nodes, [/^direccion de nivel primar/, /^direccion del nivel primar/]);
-  const secondaryDirection = firstMatch(nodes, [/^direccion de nivel secundar/, /^direccion del nivel secundar/]);
+  const initialDirection = firstMatch(nodes, [
+    /^direccion de nivel inicial$/,
+    /^direccion del nivel inicial$/,
+    /^direccion nivel inicial$/,
+  ]);
+  const primaryDirection = firstMatch(nodes, [
+    /^direccion de nivel primar/,
+    /^direccion del nivel primar/,
+    /^direccion nivel primar/,
+  ]);
+  const secondaryDirection = firstMatch(nodes, [
+    /^direccion de nivel secundar/,
+    /^direccion del nivel secundar/,
+    /^direccion nivel secundar/,
+    /^rectoria.*secundar/,
+  ]);
   [initialDirection, primaryDirection, secondaryDirection].forEach((node) => assign(node, academicCouncil ?? areaAcademica ?? governmentParent));
 
-  const initialLeadership = firstMatch(nodes, [/^equipo directivo.*inicial/]);
-  const primaryLeadership = firstMatch(nodes, [/^equipo directivo.*primar/]);
-  const secondaryLeadership = firstMatch(nodes, [/^equipo directivo.*secundar/]);
+  // Los tres Equipos Directivos deben formar parte de la jerarquía real. En el
+  // organigrama histórico aparecían visualmente al costado y vinculados por
+  // Integra, pero eso los dejaba fuera de la navegación por flechas. Aceptamos
+  // varias formas de título para no depender de una carga exacta.
+  const initialLeadership = firstMatch(nodes, [
+    /^equipo directivo.*inicial/,
+    /^equipo de direccion.*inicial/,
+    /^equipo de conduccion.*inicial/,
+  ]);
+  const primaryLeadership = firstMatch(nodes, [
+    /^equipo directivo.*primar/,
+    /^equipo de direccion.*primar/,
+    /^equipo de conduccion.*primar/,
+  ]);
+  const secondaryLeadership = firstMatch(nodes, [
+    /^equipo directivo.*secundar/,
+    /^equipo de direccion.*secundar/,
+    /^equipo de conduccion.*secundar/,
+  ]);
   assign(initialLeadership, initialDirection ?? academicCouncil ?? areaAcademica ?? governmentParent);
   assign(primaryLeadership, primaryDirection ?? academicCouncil ?? areaAcademica ?? governmentParent);
   assign(secondaryLeadership, secondaryDirection ?? academicCouncil ?? areaAcademica ?? governmentParent);
 
-  const initialVice = firstMatch(nodes, [/^vicedireccion.*inicial/, /^vice direccion.*inicial/]);
-  const primaryVice = firstMatch(nodes, [/^vicedireccion.*primar/, /^vice direccion.*primar/]);
-  const secondaryVice = firstMatch(nodes, [/^vicedireccion.*secundar/, /^vice direccion.*secundar/]);
+  const initialVice = firstMatch(nodes, [/^vicedireccion.*inicial/, /^vice direccion.*inicial/, /^vice.*nivel inicial/]);
+  const primaryVice = firstMatch(nodes, [/^vicedireccion.*primar/, /^vice direccion.*primar/, /^vice.*nivel primar/]);
+  const secondaryVice = firstMatch(nodes, [/^vicedireccion.*secundar/, /^vice direccion.*secundar/, /^vice.*nivel secundar/]);
   assign(initialVice, initialDirection ?? initialLeadership);
   assign(primaryVice, primaryDirection ?? primaryLeadership);
   assign(secondaryVice, secondaryDirection ?? secondaryLeadership);
