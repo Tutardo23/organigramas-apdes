@@ -7,6 +7,11 @@ import {
   type PucaraHitoNode,
   type PucaraHitoPerson,
 } from "../../../../lib/pucara-hito-template";
+import { getOrgSimplePreset } from "../../../../lib/org-simple-presets";
+import {
+  buildBuenAyreSimpleHierarchy,
+  isBuenAyreSchoolSlug,
+} from "../../../../lib/buen-ayre-simple-hierarchy";
 
 type PositionInput = {
   nodeId: string;
@@ -27,6 +32,27 @@ function hoursOrNull(value: unknown) {
   if (value === null || value === undefined || value === "") return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+const NODE_AREAS = [
+  "DIRECCION",
+  "ACADEMICA",
+  "FORMACION",
+  "FAMILIA",
+  "COMUNICACION",
+  "POSTULACIONES",
+  "OPERACIONES",
+  "ADMINISTRACION",
+  "TUTORIA",
+  "CAPELLANIA",
+  "OTRO",
+] as const;
+
+type NodeAreaValue = (typeof NODE_AREAS)[number];
+
+function safeArea(value: unknown): NodeAreaValue {
+  const text = typeof value === "string" ? value.trim().toUpperCase() : "";
+  return NODE_AREAS.includes(text as NodeAreaValue) ? (text as NodeAreaValue) : "OTRO";
 }
 
 function normalizePhotoUrl(value: unknown) {
@@ -57,6 +83,37 @@ function normalizeNode(node: any) {
   };
 }
 
+async function schoolIdForSlug(schoolSlug: string) {
+  const school = await (prisma as any).school.findUnique({
+    where: { slug: schoolSlug },
+    select: { id: true },
+  });
+  if (!school) throw new Error("No se encontró el colegio.");
+  return school.id as string;
+}
+
+async function assertChartBelongsToSchool(orgChartId: string, schoolSlug: string) {
+  const schoolId = await schoolIdForSlug(schoolSlug);
+  const chart = await (prisma as any).orgChart.findFirst({
+    where: { id: orgChartId, schoolId },
+    select: { id: true, schoolId: true },
+  });
+  if (!chart) throw new Error("El organigrama no pertenece a este colegio.");
+  return chart;
+}
+
+async function assertNodeBelongsToSchool(nodeId: string, schoolSlug: string) {
+  const schoolId = await schoolIdForSlug(schoolSlug);
+  const node = await (prisma as any).orgNode.findUnique({
+    where: { id: nodeId },
+    include: { orgChart: { select: { schoolId: true } } },
+  });
+  if (!node || node.orgChart?.schoolId !== schoolId) {
+    throw new Error("La caja no pertenece a este colegio.");
+  }
+  return node;
+}
+
 async function getNodeWithPeople(nodeId: string) {
   return (prisma as any).orgNode.findUnique({
     where: { id: nodeId },
@@ -75,7 +132,7 @@ export async function createPucaraStarterChartAction(input: {
   schoolSlug: string;
   title: string;
   year: number | string;
-  starter?: "basic" | "single";
+  starter?: "basic" | "single" | "core";
 }) {
   const school = await (prisma as any).school.findUnique({
     where: { slug: input.schoolSlug },
@@ -88,7 +145,7 @@ export async function createPucaraStarterChartAction(input: {
   }
 
   const title = input.title.trim() || `Organigrama ${school.name} ${year}`;
-  const starter = input.starter === "single" ? "single" : "basic";
+  const starter = input.starter === "single" || input.starter === "core" ? input.starter : "basic";
 
   const result = await prisma.$transaction(async (tx) => {
     const chart = await (tx as any).orgChart.create({
@@ -98,70 +155,89 @@ export async function createPucaraStarterChartAction(input: {
         year,
         status: "DRAFT",
         version: 1,
-        summary: "Organigrama jerárquico simple creado desde la vista Pucará.",
+        summary: "Organigrama institucional simple, editable y navegable.",
       },
+    });
+
+    const makeNode = (data: any) => (tx as any).orgNode.create({
+      data: { orgChartId: chart.id, ...data },
     });
 
     if (starter === "single") {
-      const root = await (tx as any).orgNode.create({
-        data: {
-          orgChartId: chart.id,
-          title: "Dirección General",
-          area: "DIRECCION",
-          formalRole: "Dirección del colegio",
-          realFunction: "Conducción general",
-          description: "Conduce la vida institucional y articula las decisiones de los distintos equipos.",
-          positionX: 560,
-          positionY: 100,
-          color: "#1C3A62",
-          icon: "network",
-          order: 1,
-        },
-      });
-      return { chart, rootId: root.id };
-    }
-
-    const council = await (tx as any).orgNode.create({
-      data: {
-        orgChartId: chart.id,
-        title: "Consejo de Dirección",
-        area: "DIRECCION",
-        formalRole: "Órgano de conducción institucional",
-        realFunction: "Conducción y definición de criterios",
-        description: "Define criterios, prioridades y acompaña la conducción general del colegio.",
-        positionX: 560,
-        positionY: 80,
-        color: "#1C3A62",
-        icon: "network",
-        order: 1,
-      },
-    });
-
-    const director = await (tx as any).orgNode.create({
-      data: {
-        orgChartId: chart.id,
+      const root = await makeNode({
         title: "Dirección General",
         area: "DIRECCION",
         formalRole: "Dirección del colegio",
         realFunction: "Conducción general",
         description: "Conduce la vida institucional y articula las decisiones de los distintos equipos.",
         positionX: 560,
-        positionY: 470,
-        color: "#2E6B4B",
+        positionY: 100,
+        color: "#1C3A62",
         icon: "network",
-        order: 2,
-      },
+        order: 1,
+      });
+      return { chart, rootId: root.id };
+    }
+
+    const council = await makeNode({
+      title: "Consejo de Dirección",
+      area: "DIRECCION",
+      formalRole: "Órgano de conducción institucional",
+      realFunction: "Conducción y definición de criterios",
+      description: "Define criterios, prioridades y acompaña la conducción general del colegio.",
+      positionX: 760,
+      positionY: 80,
+      color: "#1C3A62",
+      icon: "users",
+      order: 1,
+    });
+
+    const director = await makeNode({
+      title: "Dirección General",
+      area: "DIRECCION",
+      formalRole: "Dirección del colegio",
+      realFunction: "Conducción general",
+      description: "Conduce la vida institucional y articula las decisiones de los distintos equipos.",
+      positionX: 760,
+      positionY: 470,
+      color: "#2E6B4B",
+      icon: "landmark",
+      order: 2,
     });
 
     await (tx as any).orgEdge.create({
-      data: {
-        orgChartId: chart.id,
-        sourceId: council.id,
-        targetId: director.id,
-        type: "JERARQUICA",
-        label: null,
-      },
+      data: { orgChartId: chart.id, sourceId: council.id, targetId: director.id, type: "JERARQUICA", label: null },
     });
+
+    if (starter === "core") {
+      const presets = [
+        ["nivel-inicial", 0, 900],
+        ["nivel-primario", 440, 900],
+        ["nivel-secundario", 880, 900],
+        ["formacion-integral", 1320, 900],
+        ["familias", 1760, 900],
+        ["administracion", 2200, 900],
+      ] as const;
+      let order = 3;
+      for (const [key, x, y] of presets) {
+        const preset = getOrgSimplePreset(key)!;
+        const node = await makeNode({
+          title: preset.title,
+          area: safeArea(preset.area),
+          formalRole: preset.formalRole,
+          realFunction: preset.realFunction,
+          description: preset.description,
+          positionX: x,
+          positionY: y,
+          color: preset.color,
+          icon: preset.icon,
+          order: order++,
+        });
+        await (tx as any).orgEdge.create({
+          data: { orgChartId: chart.id, sourceId: director.id, targetId: node.id, type: "JERARQUICA", label: null },
+        });
+      }
+    }
 
     return { chart, rootId: council.id };
   });
@@ -176,14 +252,20 @@ export async function savePucaraPositionsAction(input: {
 }) {
   if (!input.positions.length) return { ok: true };
 
+  const schoolId = await schoolIdForSlug(input.schoolSlug);
+  const touched = await (prisma as any).orgNode.findMany({
+    where: { id: { in: input.positions.map((position) => position.nodeId) } },
+    include: { orgChart: { select: { schoolId: true } } },
+  });
+  if (touched.length !== input.positions.length || touched.some((node: any) => node.orgChart?.schoolId !== schoolId)) {
+    throw new Error("Hay cajas que no pertenecen a este colegio.");
+  }
+
   await prisma.$transaction(
     input.positions.map((position) =>
       (prisma as any).orgNode.update({
         where: { id: position.nodeId },
-        data: {
-          positionX: position.positionX,
-          positionY: position.positionY,
-        },
+        data: { positionX: position.positionX, positionY: position.positionY },
       }),
     ),
   );
@@ -198,6 +280,7 @@ export async function movePucaraNodeAction(input: {
   positionX: number;
   positionY: number;
 }) {
+  await assertNodeBelongsToSchool(input.nodeId, input.schoolSlug);
   const node = await (prisma as any).orgNode.update({
     where: { id: input.nodeId },
     data: {
@@ -221,6 +304,7 @@ export async function updatePucaraNodeAction(input: {
   schoolSlug: string;
   nodeId: string;
   title: string;
+  area?: string | null;
   formalRole?: string | null;
   realFunction?: string | null;
   description?: string | null;
@@ -233,6 +317,8 @@ export async function updatePucaraNodeAction(input: {
 }) {
   const currentNode = await getNodeWithPeople(input.nodeId);
   if (!currentNode) throw new Error("No se encontró la función seleccionada.");
+  const schoolId = await schoolIdForSlug(input.schoolSlug);
+  if (currentNode.orgChart?.schoolId !== schoolId) throw new Error("La caja no pertenece a este colegio.");
 
   const firstName = textOrNull(input.firstName);
   const lastName = textOrNull(input.lastName);
@@ -290,6 +376,7 @@ export async function updatePucaraNodeAction(input: {
       where: { id: input.nodeId },
       data: {
         title: input.title.trim() || "Sin título",
+        area: safeArea(input.area ?? currentNode.area),
         formalRole,
         realFunction,
         description: textOrNull(input.description),
@@ -316,54 +403,54 @@ export async function createPucaraChildAction(input: {
   schoolSlug: string;
   orgChartId: string;
   parentNodeId: string;
+  presetKey?: string | null;
+  title?: string | null;
+  area?: string | null;
+  formalRole?: string | null;
+  realFunction?: string | null;
+  description?: string | null;
 }) {
+  await assertChartBelongsToSchool(input.orgChartId, input.schoolSlug);
   const parent = await (prisma as any).orgNode.findFirst({
     where: { id: input.parentNodeId, orgChartId: input.orgChartId },
   });
   if (!parent) throw new Error("No se encontró la caja superior.");
 
+  const preset = getOrgSimplePreset(input.presetKey);
+  const title = textOrNull(input.title) || preset?.title || "Nueva función";
+  const area = safeArea(preset?.area || input.area || parent.area);
+  const formalRole = textOrNull(input.formalRole) || preset?.formalRole || null;
+  const realFunction = textOrNull(input.realFunction) || preset?.realFunction || null;
+  const description = textOrNull(input.description) || preset?.description || null;
+
   const nextOrder =
     (await (prisma as any).orgNode.count({ where: { orgChartId: input.orgChartId } })) + 1;
   const siblingCount = await (prisma as any).orgEdge.count({
-    where: {
-      orgChartId: input.orgChartId,
-      sourceId: parent.id,
-      type: "JERARQUICA",
-    },
+    where: { orgChartId: input.orgChartId, sourceId: parent.id, type: "JERARQUICA" },
   });
   const slot = siblingCount === 0
     ? 0
     : Math.ceil(siblingCount / 2) * 460 * (siblingCount % 2 === 1 ? 1 : -1);
 
-  const nextColor: Record<string, string> = {
-    "#1C3A62": "#2E6B4B",
-    "#2E6B4B": "#ECC300",
-    "#ECC300": "#6B7280",
-    "#6B7280": "#94A3B8",
-  };
-
   const result = await prisma.$transaction(async (tx) => {
     const node = await (tx as any).orgNode.create({
       data: {
         orgChartId: input.orgChartId,
-        title: "Nueva función",
-        area: parent.area,
-        formalRole: null,
-        realFunction: null,
-        description: null,
+        title,
+        area,
+        formalRole,
+        realFunction,
+        description,
         weeklyHours: null,
         positionX: Number(parent.positionX ?? 0) + slot,
         positionY: Number(parent.positionY ?? 0) + 500,
-        color: nextColor[String(parent.color ?? "").toUpperCase()] || parent.color || "#64748B",
-        icon: parent.icon,
+        color: preset?.color || parent.color || "#64748B",
+        icon: preset?.icon || parent.icon || "network",
         order: nextOrder,
       },
       include: {
         person: true,
-        members: {
-          include: { person: true },
-          orderBy: [{ role: "asc" }, { order: "asc" }],
-        },
+        members: { include: { person: true }, orderBy: [{ role: "asc" }, { order: "asc" }] },
       },
     });
 
@@ -390,6 +477,7 @@ export async function reparentPucaraNodeAction(input: {
   nodeId: string;
   parentNodeId: string | null;
 }) {
+  await assertChartBelongsToSchool(input.orgChartId, input.schoolSlug);
   if (input.parentNodeId === input.nodeId) {
     throw new Error("Una caja no puede depender de sí misma.");
   }
@@ -460,10 +548,201 @@ export async function reparentPucaraNodeAction(input: {
   return { ok: true, edge };
 }
 
+export async function createPucaraRelationAction(input: {
+  schoolSlug: string;
+  orgChartId: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  type: "DECISION" | "COLABORACION";
+}) {
+  await assertChartBelongsToSchool(input.orgChartId, input.schoolSlug);
+  if (input.sourceNodeId === input.targetNodeId) {
+    throw new Error("Una caja no puede relacionarse consigo misma.");
+  }
+
+  const nodes = await (prisma as any).orgNode.findMany({
+    where: { orgChartId: input.orgChartId, id: { in: [input.sourceNodeId, input.targetNodeId] } },
+    select: { id: true },
+  });
+  if (nodes.length !== 2) throw new Error("Las dos cajas deben pertenecer al mismo organigrama.");
+
+  const existing = await (prisma as any).orgEdge.findFirst({
+    where: {
+      orgChartId: input.orgChartId,
+      type: input.type,
+      OR: [
+        { sourceId: input.sourceNodeId, targetId: input.targetNodeId },
+        { sourceId: input.targetNodeId, targetId: input.sourceNodeId },
+      ],
+    },
+  });
+  if (existing) return existing;
+
+  const edge = await (prisma as any).orgEdge.create({
+    data: {
+      orgChartId: input.orgChartId,
+      sourceId: input.sourceNodeId,
+      targetId: input.targetNodeId,
+      type: input.type,
+      label: input.type === "DECISION" ? "Integra" : "Colabora",
+    },
+  });
+  revalidateSchool(input.schoolSlug);
+  return edge;
+}
+
+export async function deletePucaraRelationAction(input: {
+  schoolSlug: string;
+  edgeId: string;
+}) {
+  const edge = await (prisma as any).orgEdge.findUnique({ where: { id: input.edgeId } });
+  if (!edge) return { ok: true };
+  await assertNodeBelongsToSchool(edge.sourceId, input.schoolSlug);
+  if (edge.type === "JERARQUICA") throw new Error("La dependencia jerárquica se cambia desde ‘Depende de’.");
+  await (prisma as any).orgEdge.delete({ where: { id: input.edgeId } });
+  revalidateSchool(input.schoolSlug);
+  return { ok: true };
+}
+
+/**
+ * Convierte organigramas viejos (por ejemplo Buen Ayre) al modelo definitivo:
+ * cada caja tiene una dependencia jerárquica además de sus vínculos Integra/Colabora.
+ * No elimina ninguna relación transversal existente.
+ */
+export async function normalizePucaraHierarchyAction(input: {
+  schoolSlug: string;
+  orgChartId: string;
+}) {
+  await assertChartBelongsToSchool(input.orgChartId, input.schoolSlug);
+  const nodes = await (prisma as any).orgNode.findMany({
+    where: { orgChartId: input.orgChartId },
+    select: { id: true, title: true, area: true, positionX: true, positionY: true },
+  });
+  if (nodes.length <= 1) {
+    return { created: 0, rebuilt: false, hierarchyEdges: [] as any[] };
+  }
+
+  // Buen Ayre necesita una reconstrucción determinística. Su modelo histórico
+  // usaba varios vínculos Integra/Colabora como si fueran dependencia, y al
+  // intentar completar solo "lo que faltaba" quedaba una estructura imposible
+  // de leer. Acá reemplazamos ÚNICAMENTE la jerarquía y conservamos todas las
+  // relaciones transversales, personas, fotos y cajas.
+  if (isBuenAyreSchoolSlug(input.schoolSlug)) {
+    const links = buildBuenAyreSimpleHierarchy(nodes);
+    await prisma.$transaction(async (tx) => {
+      await (tx as any).orgEdge.deleteMany({
+        where: { orgChartId: input.orgChartId, type: "JERARQUICA" },
+      });
+      if (links.length) {
+        await (tx as any).orgEdge.createMany({
+          data: links.map((link) => ({
+            orgChartId: input.orgChartId,
+            sourceId: link.sourceId,
+            targetId: link.targetId,
+            type: "JERARQUICA",
+            label: null,
+          })),
+        });
+      }
+    }, { maxWait: 10_000, timeout: 30_000 });
+
+    const hierarchyEdges = await (prisma as any).orgEdge.findMany({
+      where: { orgChartId: input.orgChartId, type: "JERARQUICA" },
+      select: { id: true, sourceId: true, targetId: true, type: true, label: true },
+    });
+
+    revalidateSchool(input.schoolSlug);
+    return { created: hierarchyEdges.length, rebuilt: true, hierarchyEdges };
+  }
+
+  const hierarchy = await (prisma as any).orgEdge.findMany({
+    where: { orgChartId: input.orgChartId, type: "JERARQUICA" },
+    select: { sourceId: true, targetId: true },
+  });
+  const incoming = new Set(hierarchy.map((edge: any) => edge.targetId));
+  const children = new Map<string, string[]>();
+  hierarchy.forEach((edge: any) => {
+    const list = children.get(edge.sourceId) ?? [];
+    list.push(edge.targetId);
+    children.set(edge.sourceId, list);
+  });
+
+  const norm = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const council = nodes.find((node: any) => norm(node.title).includes("consejo de direccion"));
+  const director = nodes.find((node: any) => norm(node.title).includes("direccion general") || norm(node.title).includes("director general"));
+  const root = council ?? director ?? [...nodes].sort((a: any, b: any) => Number(a.positionY) - Number(b.positionY))[0];
+
+  const isDescendant = (ancestorId: string, possibleDescendantId: string) => {
+    const stack = [...(children.get(ancestorId) ?? [])];
+    const seen = new Set<string>();
+    while (stack.length) {
+      const id = stack.pop()!;
+      if (id === possibleDescendantId) return true;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      stack.push(...(children.get(id) ?? []));
+    }
+    return false;
+  };
+
+  const additions: { orgChartId: string; sourceId: string; targetId: string; type: "JERARQUICA"; label: null }[] = [];
+  const willHaveIncoming = new Set(incoming);
+
+  if (council && director && council.id !== director.id && !willHaveIncoming.has(director.id)) {
+    additions.push({ orgChartId: input.orgChartId, sourceId: council.id, targetId: director.id, type: "JERARQUICA", label: null });
+    willHaveIncoming.add(director.id);
+  }
+
+  const defaultParent = director ?? root;
+  const ordered = [...nodes].sort((a: any, b: any) => Number(a.positionY) - Number(b.positionY));
+  for (const node of ordered as any[]) {
+    if (node.id === root.id || willHaveIncoming.has(node.id)) continue;
+
+    let parent: any = null;
+    if (defaultParent && node.id !== defaultParent.id) {
+      const sameAreaAbove = (nodes as any[])
+        .filter((candidate) =>
+          candidate.id !== node.id &&
+          candidate.id !== root.id &&
+          candidate.area === node.area &&
+          Number(candidate.positionY) < Number(node.positionY) - 40 &&
+          !isDescendant(node.id, candidate.id),
+        )
+        .sort((a, b) => {
+          const dyA = Number(node.positionY) - Number(a.positionY);
+          const dyB = Number(node.positionY) - Number(b.positionY);
+          if (Math.abs(dyA - dyB) > 1) return dyA - dyB;
+          return Math.abs(Number(node.positionX) - Number(a.positionX)) - Math.abs(Number(node.positionX) - Number(b.positionX));
+        });
+      parent = sameAreaAbove[0] ?? defaultParent;
+    }
+    if (!parent || parent.id === node.id || isDescendant(node.id, parent.id)) parent = root;
+    if (!parent || parent.id === node.id) continue;
+
+    additions.push({ orgChartId: input.orgChartId, sourceId: parent.id, targetId: node.id, type: "JERARQUICA", label: null });
+    willHaveIncoming.add(node.id);
+    const list = children.get(parent.id) ?? [];
+    list.push(node.id);
+    children.set(parent.id, list);
+  }
+
+  if (additions.length) {
+    await (prisma as any).orgEdge.createMany({ data: additions, skipDuplicates: true });
+  }
+
+  const hierarchyEdges = await (prisma as any).orgEdge.findMany({
+    where: { orgChartId: input.orgChartId, type: "JERARQUICA" },
+    select: { id: true, sourceId: true, targetId: true, type: true, label: true },
+  });
+  revalidateSchool(input.schoolSlug);
+  return { created: additions.length, rebuilt: false, hierarchyEdges };
+}
+
 export async function deletePucaraNodeAction(input: {
   schoolSlug: string;
   nodeId: string;
 }) {
+  await assertNodeBelongsToSchool(input.nodeId, input.schoolSlug);
   const childCount = await (prisma as any).orgEdge.count({
     where: { sourceId: input.nodeId, type: "JERARQUICA" },
   });
@@ -491,6 +770,8 @@ export async function upsertPucaraMemberAction(input: {
 }) {
   const node = await getNodeWithPeople(input.orgNodeId);
   if (!node) throw new Error("No se encontró la caja.");
+  const schoolId = await schoolIdForSlug(input.schoolSlug);
+  if (node.orgChart?.schoolId !== schoolId) throw new Error("La caja no pertenece a este colegio.");
 
   const firstName = textOrNull(input.firstName);
   const lastName = textOrNull(input.lastName);
@@ -615,6 +896,7 @@ export async function deletePucaraMemberAction(input: {
   orgNodeId: string;
   memberId: string;
 }) {
+  await assertNodeBelongsToSchool(input.orgNodeId, input.schoolSlug);
   await (prisma as any).orgNodeMember.delete({ where: { id: input.memberId } });
   const updatedNode = await getNodeWithPeople(input.orgNodeId);
   revalidateSchool(input.schoolSlug);
@@ -823,7 +1105,7 @@ export async function importPucaraHitoAction(input: { schoolSlug: string }) {
       title: "Organigrama Pucará 2026 · Modelo HITO completo",
       year: 2026,
       status: "DRAFT",
-      summary: "Copia de prueba del organigrama jerárquico del proyecto HITO, preparada para edición dentro de la plataforma APDES.",
+      summary: "Organigrama jerárquico completo del proyecto HITO, preparado para edición dentro de la plataforma APDES.",
     },
     create: {
       id: chartId,
@@ -832,7 +1114,7 @@ export async function importPucaraHitoAction(input: { schoolSlug: string }) {
       year: 2026,
       status: "DRAFT",
       version: 1,
-      summary: "Copia de prueba del organigrama jerárquico del proyecto HITO, preparada para edición dentro de la plataforma APDES.",
+      summary: "Organigrama jerárquico completo del proyecto HITO, preparado para edición dentro de la plataforma APDES.",
     },
   });
 

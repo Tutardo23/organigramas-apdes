@@ -31,7 +31,9 @@ import {
   Edit3,
   Eye,
   ImageIcon,
+  Info,
   LayoutGrid,
+  Link2,
   Loader2,
   Mail,
   Plus,
@@ -55,16 +57,21 @@ import {
 } from "react";
 import {
   createPucaraChildAction,
+  createPucaraRelationAction,
   createPucaraStarterChartAction,
+  deletePucaraRelationAction,
   importPucaraHitoAction,
   deletePucaraMemberAction,
   deletePucaraNodeAction,
   movePucaraNodeAction,
+  normalizePucaraHierarchyAction,
   reparentPucaraNodeAction,
   savePucaraPositionsAction,
   updatePucaraNodeAction,
   upsertPucaraMemberAction,
 } from "../../app/organigramas/[schoolSlug]/pucara/actions";
+import { ORG_SIMPLE_PRESETS } from "../../lib/org-simple-presets";
+import { isBuenAyreSchoolSlug } from "../../lib/buen-ayre-simple-hierarchy";
 
 type Person = {
   id: string;
@@ -105,14 +112,20 @@ type SourceEdge = {
   label?: string | null;
 };
 
+type RelationHighlight = "integration" | "collaboration" | "both" | null;
+
 type CardData = SourceNode & {
+  schoolSlug: string;
+  schoolName: string;
   schoolLogoUrl?: string | null;
   isFocused: boolean;
+  relationHighlight: RelationHighlight;
   isExpanded: boolean;
   hasChildren: boolean;
   cardHeight: number;
   onToggle: (nodeId: string) => void;
   onOpenPeople: (nodeId: string) => void;
+  onFocusPerson: (nodeId: string, personId: string) => void;
 };
 
 type Props = {
@@ -124,10 +137,18 @@ type Props = {
   initialNodes: SourceNode[];
   initialEdges: SourceEdge[];
   existingPeople: Person[];
+  initialMode?: "view" | "edit";
+  availableCharts?: {
+    id: string;
+    title: string;
+    year: number;
+    version?: number | null;
+    status?: string | null;
+  }[];
 };
 
 type Mode = "view" | "edit";
-type EditorSection = "function" | "team";
+type EditorSection = "function" | "team" | "relations";
 type ViewSnapshot = { expanded: string[]; focusedId: string | null };
 
 const NODE_WIDTH = 380;
@@ -277,11 +298,54 @@ function PersonAvatar({ person, className = "h-14 w-14" }: { person?: Person | n
   );
 }
 
+function SchoolLogo({
+  schoolSlug,
+  schoolName,
+  schoolLogoUrl,
+  className = "h-14 w-14",
+}: {
+  schoolSlug: string;
+  schoolName: string;
+  schoolLogoUrl?: string | null;
+  className?: string;
+}) {
+  const candidates = useMemo(() => {
+    const values = [
+      schoolLogoUrl?.trim() || null,
+      `/images/colegios/${schoolSlug}.png`,
+      schoolSlug === "pucara" ? "/images/escudo-pucara.png" : null,
+    ].filter((value): value is string => Boolean(value));
+    return Array.from(new Set(values));
+  }, [schoolLogoUrl, schoolSlug]);
+  const [index, setIndex] = useState(0);
+  useEffect(() => setIndex(0), [schoolLogoUrl, schoolSlug]);
+  const src = candidates[index] ?? null;
+  const initials = schoolName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+
+  return (
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${className}`}>
+      {src ? (
+        <img src={src} alt={`Escudo de ${schoolName}`} className="h-full w-full object-contain p-1" onError={() => setIndex((current) => current + 1)} />
+      ) : (
+        <span className="text-sm font-black text-slate-500">{initials || "AP"}</span>
+      )}
+    </div>
+  );
+}
+
 function PucaraCard({ data }: NodeProps<Node<CardData>>) {
   const color = data.color || "#1C3A62";
   const people = peopleForNode(data);
   const shownPeople = people;
   const isCollective = people.length > 1;
+  const relationStyle =
+    data.relationHighlight === "integration"
+      ? "border-red-300 ring-4 ring-red-200/80 shadow-red-100"
+      : data.relationHighlight === "collaboration"
+        ? "border-blue-300 ring-4 ring-blue-200/80 shadow-blue-100"
+        : data.relationHighlight === "both"
+          ? "border-violet-300 ring-4 ring-violet-200/80 shadow-violet-100"
+          : "border-slate-200 hover:-translate-y-0.5 hover:shadow-2xl";
 
   return (
     <div className="relative w-[380px]" style={{ minHeight: data.cardHeight }}>
@@ -295,21 +359,26 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
         className={`overflow-hidden rounded-[26px] border bg-white shadow-xl transition-all duration-300 ${
           data.isFocused
             ? "scale-[1.025] border-amber-300 ring-4 ring-amber-300/70"
-            : "border-slate-200 hover:-translate-y-0.5 hover:shadow-2xl"
+            : relationStyle
         }`}
         style={{ minHeight: data.cardHeight }}
       >
+        {data.relationHighlight ? (
+          <div className={`absolute right-3 top-3 z-20 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] shadow-sm ${
+            data.relationHighlight === "integration"
+              ? "border-red-200 bg-red-50 text-red-700"
+              : data.relationHighlight === "collaboration"
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-violet-200 bg-violet-50 text-violet-700"
+          }`}>
+            {data.relationHighlight === "integration" ? "Integra" : data.relationHighlight === "collaboration" ? "Colabora" : "Integra + Colabora"}
+          </div>
+        ) : null}
         <div className="flex min-h-[126px] items-center gap-4 px-5 py-4 text-white" style={{ backgroundColor: color }}>
           {data.person ? (
             <PersonAvatar person={data.person} className="h-16 w-16" />
           ) : (
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white/95 shadow-sm">
-              <img
-                src={data.schoolLogoUrl || "/images/escudo-pucara.png"}
-                alt="Escudo"
-                className="h-full w-full object-contain p-2"
-              />
-            </div>
+            <SchoolLogo schoolSlug={data.schoolSlug} schoolName={data.schoolName} schoolLogoUrl={data.schoolLogoUrl} className="h-16 w-16 !rounded-full !border-0" />
           )}
 
           <div className="min-w-0">
@@ -337,9 +406,10 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
                   key={`${person.id}-${index}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    data.onOpenPeople(data.id);
+                    data.onFocusPerson(data.id, person.id);
                   }}
-                  className="min-h-[72px] border-b border-slate-200 px-5 py-3 text-left transition hover:bg-slate-50 even:border-l"
+                  title="Ir a la función de esta persona"
+                  className="min-h-[72px] border-b border-slate-200 px-5 py-3 text-left transition hover:bg-blue-50 even:border-l"
                 >
                   <p className="text-[15px] font-black leading-tight text-[#123868]">{first}</p>
                   <p className="mt-0.5 text-sm font-medium leading-tight text-slate-500">{rest || person.role}</p>
@@ -353,7 +423,7 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
             {data.weeklyHours ? (
               <p className="text-xs font-black text-slate-400">{data.weeklyHours} hs. semanales</p>
             ) : (
-              <p className="text-xs font-semibold text-slate-400">Tocá la tarjeta para ver la ficha completa.</p>
+              <p className="text-xs font-semibold text-slate-400">Tocá la tarjeta para enfocarla. La ficha se abre con el botón de información.</p>
             )}
           </div>
         )}
@@ -377,20 +447,19 @@ function PucaraCard({ data }: NodeProps<Node<CardData>>) {
           </button>
         ) : null}
 
-        {people.length > 1 ? (
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              data.onOpenPeople(data.id);
-            }}
-            className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-full border-4 border-white bg-amber-400 px-3 text-[#123868] shadow-lg transition hover:scale-105"
-            aria-label="Ver todas las personas"
-          >
-            <UsersRound className="h-5 w-5" />
-            <span className="text-xs font-black">{people.length}</span>
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onOpenPeople(data.id);
+          }}
+          className="flex h-11 min-w-11 items-center justify-center gap-2 rounded-full border-4 border-white bg-amber-400 px-3 text-[#123868] shadow-lg transition hover:scale-105"
+          aria-label="Ver ficha de la función"
+          title="Ver ficha"
+        >
+          <Info className="h-5 w-5" />
+          {people.length > 1 ? <span className="text-xs font-black">{people.length}</span> : null}
+        </button>
       </div>
 
       <Handle
@@ -487,11 +556,12 @@ function autoLayout(
 
 function ChartInner(props: Props) {
   const { fitView, setCenter } = useReactFlow();
-  const [mode, setMode] = useState<Mode>("view");
+  const [mode, setMode] = useState<Mode>(props.initialMode === "edit" ? "edit" : "view");
   const [sourceNodes, setSourceNodes] = useState(props.initialNodes);
   const [sourceEdges, setSourceEdges] = useState(props.initialEdges);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [relationFocusId, setRelationFocusId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [peoplePanelNodeId, setPeoplePanelNodeId] = useState<string | null>(null);
   const [editorSection, setEditorSection] = useState<EditorSection>("function");
@@ -500,11 +570,25 @@ function ChartInner(props: Props) {
   const [isPending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [showCreateChart, setShowCreateChart] = useState(false);
+  const [showCreateNode, setShowCreateNode] = useState(false);
+  const [createNodeParentId, setCreateNodeParentId] = useState<string | null>(null);
   const [directoryPeople, setDirectoryPeople] = useState<Person[]>(props.existingPeople);
   const pendingFitNodeRef = useRef<string | null>(null);
   const pendingNavigationFocusRef = useRef<string | null>(null);
+  const isBuenAyre = isBuenAyreSchoolSlug(props.schoolSlug);
 
-  const { depth, roots } = useMemo(() => buildDepthMap(sourceNodes, sourceEdges), [sourceNodes, sourceEdges]);
+  const hierarchyEdges = useMemo(
+    () => sourceEdges.filter((edge) => edge.type === "JERARQUICA"),
+    [sourceEdges],
+  );
+  const relationEdges = useMemo(
+    () => sourceEdges.filter((edge) => edge.type !== "JERARQUICA"),
+    [sourceEdges],
+  );
+  const { depth, roots } = useMemo(
+    () => buildDepthMap(sourceNodes, hierarchyEdges),
+    [sourceNodes, hierarchyEdges],
+  );
 
   useEffect(() => {
     if (!focusedId && roots[0]) setFocusedId(roots[0]);
@@ -516,18 +600,49 @@ function ChartInner(props: Props) {
     let changed = true;
     while (changed) {
       changed = false;
-      sourceEdges.forEach((edge) => {
+      hierarchyEdges.forEach((edge) => {
         if (visible.has(edge.sourceId) && expanded.has(edge.sourceId) && !visible.has(edge.targetId)) {
           visible.add(edge.targetId);
           changed = true;
         }
       });
     }
-    return visible;
-  }, [mode, sourceNodes, sourceEdges, roots, expanded]);
 
-  // En esta versión la vista usa exactamente las posiciones guardadas.
-  // Así mover una caja en Editar cambia de verdad el diseño que después ve el colegio.
+    // Los vínculos no abren el área completa. Al tocar una caja mostramos
+    // solamente las cajas directamente relacionadas.
+    if (relationFocusId) {
+      relationEdges.forEach((edge) => {
+        if (edge.sourceId === relationFocusId) visible.add(edge.targetId);
+        if (edge.targetId === relationFocusId) visible.add(edge.sourceId);
+      });
+    }
+    return visible;
+  }, [mode, sourceNodes, hierarchyEdges, relationEdges, roots, expanded, relationFocusId]);
+
+  const relationHighlightByNode = useMemo(() => {
+    const map = new Map<string, RelationHighlight>();
+    if (!relationFocusId) return map;
+    const add = (nodeId: string, type: string) => {
+      const next: RelationHighlight = type === "DECISION" ? "integration" : "collaboration";
+      const current = map.get(nodeId) ?? null;
+      map.set(nodeId, current && current !== next ? "both" : next);
+    };
+    relationEdges.forEach((edge) => {
+      if (edge.sourceId === relationFocusId) add(edge.targetId, edge.type);
+      if (edge.targetId === relationFocusId) add(edge.sourceId, edge.type);
+    });
+    return map;
+  }, [relationFocusId, relationEdges]);
+
+  const focusedRelations = useMemo(
+    () => relationFocusId
+      ? relationEdges.filter((edge) => edge.sourceId === relationFocusId || edge.targetId === relationFocusId)
+      : [],
+    [relationFocusId, relationEdges],
+  );
+
+  // La vista usa exactamente las posiciones guardadas. Mover una caja en
+  // Editar cambia de verdad la vista del colegio.
   const displayNodes = sourceNodes;
 
   const pushHistory = useCallback(() => {
@@ -540,6 +655,53 @@ function ChartInner(props: Props) {
 
   const openPeople = useCallback((nodeId: string) => setPeoplePanelNodeId(nodeId), []);
 
+  const focusPersonInChart = useCallback((fromNodeId: string, personId: string) => {
+    const principalTarget = sourceNodes.find(
+      (node) => node.id !== fromNodeId && node.person?.id === personId,
+    );
+    const memberTarget = sourceNodes.find(
+      (node) =>
+        node.id !== fromNodeId &&
+        node.members.some((member) => member.person.id === personId),
+    );
+    const target = principalTarget ?? memberTarget ?? null;
+
+    if (!target) {
+      setMessage({
+        type: "ok",
+        text: "Esta persona todavía no tiene otra función cargada en el organigrama.",
+      });
+      return;
+    }
+
+    if (mode === "view") pushHistory();
+
+    const parentByChild = new Map(
+      hierarchyEdges.map((edge) => [edge.targetId, edge.sourceId]),
+    );
+    const ancestors: string[] = [];
+    let currentId: string | undefined = target.id;
+    const seen = new Set<string>();
+    while (currentId && !seen.has(currentId)) {
+      seen.add(currentId);
+      const parentId = parentByChild.get(currentId);
+      if (!parentId) break;
+      ancestors.push(parentId);
+      currentId = parentId;
+    }
+
+    setExpanded((current) => {
+      const next = new Set(current);
+      ancestors.forEach((id) => next.add(id));
+      return next;
+    });
+    setPeoplePanelNodeId(null);
+    setFocusedId(target.id);
+    setRelationFocusId(target.id);
+    if (mode === "edit") setSelectedId(target.id);
+    pendingNavigationFocusRef.current = target.id;
+  }, [sourceNodes, hierarchyEdges, mode, pushHistory]);
+
   const toggleNode = useCallback(
     (nodeId: string) => {
       pushHistory();
@@ -548,15 +710,16 @@ function ChartInner(props: Props) {
         const next = new Set(current);
         if (next.has(nodeId)) {
           next.delete(nodeId);
-          collectDescendants(nodeId, sourceEdges).forEach((id) => next.delete(id));
+          collectDescendants(nodeId, hierarchyEdges).forEach((id) => next.delete(id));
         } else {
           next.add(nodeId);
         }
         return next;
       });
       setFocusedId(nodeId);
+      setRelationFocusId(nodeId);
     },
-    [pushHistory, sourceEdges],
+    [pushHistory, hierarchyEdges],
   );
 
   const flowNodes = useMemo<Node<CardData>[]>(
@@ -571,37 +734,60 @@ function ChartInner(props: Props) {
         draggable: mode === "edit",
         data: {
           ...node,
+          schoolSlug: props.schoolSlug,
+          schoolName: props.schoolName,
           schoolLogoUrl: props.schoolLogoUrl,
           color: node.color || fallbackColors[Math.min(depth.get(node.id) || 0, fallbackColors.length - 1)],
           isFocused: focusedId === node.id,
+          relationHighlight: relationHighlightByNode.get(node.id) ?? null,
           isExpanded: expanded.has(node.id),
-          hasChildren: sourceEdges.some((edge) => edge.sourceId === node.id),
+          hasChildren: hierarchyEdges.some((edge) => edge.sourceId === node.id),
           cardHeight: cardHeightFor(node),
           onToggle: toggleNode,
           onOpenPeople: openPeople,
+          onFocusPerson: focusPersonInChart,
         },
       })),
-    [displayNodes, visibleIds, mode, props.schoolLogoUrl, depth, focusedId, expanded, sourceEdges, toggleNode, openPeople],
+    [displayNodes, visibleIds, mode, props.schoolSlug, props.schoolName, props.schoolLogoUrl, depth, focusedId, expanded, hierarchyEdges, relationHighlightByNode, toggleNode, openPeople, focusPersonInChart],
   );
 
   const flowEdges = useMemo<Edge[]>(
     () =>
-      sourceEdges.map((edge) => ({
-        id: edge.id,
-        source: edge.sourceId,
-        target: edge.targetId,
-        type: "smoothstep",
-        hidden: mode === "view"
-          ? !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId)
-          : false,
-        interactionWidth: 24,
-        style: {
-          stroke: "#475569",
-          strokeWidth: 3.2,
-          opacity: 1,
-        },
-      })),
-    [sourceEdges, visibleIds, mode],
+      sourceEdges.map((edge) => {
+        const hierarchy = edge.type === "JERARQUICA";
+        const directRelation =
+          !hierarchy &&
+          !!relationFocusId &&
+          (edge.sourceId === relationFocusId || edge.targetId === relationFocusId);
+        const integration = edge.type === "DECISION";
+        return {
+          id: edge.id,
+          source: edge.sourceId,
+          target: edge.targetId,
+          type: "smoothstep",
+          hidden: hierarchy
+            ? mode === "view"
+              ? !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId)
+              : false
+            : !directRelation || !visibleIds.has(edge.sourceId) || !visibleIds.has(edge.targetId),
+          interactionWidth: hierarchy ? 24 : 18,
+          animated: false,
+          style: hierarchy
+            ? { stroke: "#475569", strokeWidth: 3.2, opacity: 1 }
+            : {
+                stroke: integration ? "#dc2626" : "#2563eb",
+                strokeWidth: 2.2,
+                opacity: 0.58,
+                strokeDasharray: "7 7",
+              },
+        };
+      }),
+    [sourceEdges, visibleIds, mode, relationFocusId],
+  );
+
+  const hierarchyFlowEdges = useMemo(
+    () => flowEdges.filter((flowEdge) => hierarchyEdges.some((edge) => edge.id === flowEdge.id)),
+    [flowEdges, hierarchyEdges],
   );
 
   useEffect(() => {
@@ -635,7 +821,7 @@ function ChartInner(props: Props) {
 
     const relatedIds = new Set([
       nodeId,
-      ...sourceEdges.filter((edge) => edge.sourceId === nodeId).map((edge) => edge.targetId),
+      ...hierarchyEdges.filter((edge) => edge.sourceId === nodeId).map((edge) => edge.targetId),
     ]);
     const related = flowNodes.filter((node) => !node.hidden && relatedIds.has(node.id));
 
@@ -655,7 +841,7 @@ function ChartInner(props: Props) {
     }, 70);
 
     return () => window.clearTimeout(timer);
-  }, [mode, flowNodes, sourceEdges, fitView, setCenter]);
+  }, [mode, flowNodes, hierarchyEdges, fitView, setCenter]);
 
   const focusNode = useCallback(
     (id: string, record = true) => {
@@ -663,6 +849,7 @@ function ChartInner(props: Props) {
       if (!node) return;
       if (record) pushHistory();
       setFocusedId(id);
+      setRelationFocusId(id);
       if (mode === "edit") setSelectedId(id);
       setCenter(node.position.x + NODE_WIDTH / 2, node.position.y + cardHeightFor(node.data) / 2, {
         zoom: mode === "edit" ? 0.92 : 1.08,
@@ -716,11 +903,20 @@ function ChartInner(props: Props) {
 
   const currentNode = sourceNodes.find((node) => node.id === selectedId) ?? null;
   const peoplePanelNode = sourceNodes.find((node) => node.id === peoplePanelNodeId) ?? null;
+  const hierarchyTargets = new Set(hierarchyEdges.map((edge) => edge.targetId));
+  const preferredRootId = roots[0] ?? null;
+  const currentIsRoot = Boolean(currentNode && currentNode.id === preferredRootId);
+  const missingDependencyCount = sourceNodes.filter(
+    (node) => node.id !== preferredRootId && !hierarchyTargets.has(node.id),
+  ).length;
+  const currentRelations = currentNode
+    ? relationEdges.filter((edge) => edge.sourceId === currentNode.id || edge.targetId === currentNode.id)
+    : [];
   const currentParentId = currentNode
-    ? sourceEdges.find((edge) => edge.targetId === currentNode.id)?.sourceId ?? ""
+    ? hierarchyEdges.find((edge) => edge.targetId === currentNode.id)?.sourceId ?? ""
     : "";
   const blockedParentIds = currentNode
-    ? new Set([currentNode.id, ...collectDescendants(currentNode.id, sourceEdges)])
+    ? new Set([currentNode.id, ...collectDescendants(currentNode.id, hierarchyEdges)])
     : new Set<string>();
   const parentCandidates = currentNode
     ? sourceNodes.filter((node) => !blockedParentIds.has(node.id))
@@ -729,11 +925,11 @@ function ChartInner(props: Props) {
 
   const navigation = useMemo(() => {
     if (!focusedFlowNode) return { parent: null, children: [], siblings: [], index: -1 };
-    const parent = getIncomers(focusedFlowNode, flowNodes, flowEdges)[0] ?? null;
-    const children = getOutgoers(focusedFlowNode, flowNodes, flowEdges);
-    const siblings = parent ? getOutgoers(parent, flowNodes, flowEdges) : [];
+    const parent = getIncomers(focusedFlowNode, flowNodes, hierarchyFlowEdges)[0] ?? null;
+    const children = getOutgoers(focusedFlowNode, flowNodes, hierarchyFlowEdges);
+    const siblings = parent ? getOutgoers(parent, flowNodes, hierarchyFlowEdges) : [];
     return { parent, children, siblings, index: siblings.findIndex((node) => node.id === focusedFlowNode.id) };
-  }, [focusedFlowNode, flowNodes, flowEdges]);
+  }, [focusedFlowNode, flowNodes, hierarchyFlowEdges]);
 
   const navigateDown = useCallback(() => {
     const child = navigation.children[0];
@@ -762,13 +958,13 @@ function ChartInner(props: Props) {
       // rama. Así "Atrás" recupera también el estado visual anterior y no
       // deja al hijo abierto debajo del padre.
       if (focusedId && previous.focusedId) {
-        const cameFromDirectChild = sourceEdges.some(
+        const cameFromDirectChild = hierarchyEdges.some(
           (edge) => edge.sourceId === previous.focusedId && edge.targetId === focusedId,
         );
 
         if (cameFromDirectChild) {
           nextExpanded.delete(previous.focusedId);
-          collectDescendants(previous.focusedId, sourceEdges).forEach((id) =>
+          collectDescendants(previous.focusedId, hierarchyEdges).forEach((id) =>
             nextExpanded.delete(id),
           );
         }
@@ -776,15 +972,17 @@ function ChartInner(props: Props) {
 
       setExpanded(nextExpanded);
       setFocusedId(previous.focusedId);
+      setRelationFocusId(null);
       if (previous.focusedId) pendingFitNodeRef.current = previous.focusedId;
       return current.slice(0, -1);
     });
-  }, [focusedId, sourceEdges]);
+  }, [focusedId, hierarchyEdges]);
 
   const showAll = useCallback(() => {
     pushHistory();
     setExpanded(new Set(sourceNodes.map((node) => node.id)));
     setFocusedId(roots[0] || null);
+    setRelationFocusId(null);
     window.setTimeout(() => fitView({ duration: 600, padding: 0.08, maxZoom: 0.85 }), 60);
   }, [pushHistory, sourceNodes, roots, fitView]);
 
@@ -792,6 +990,7 @@ function ChartInner(props: Props) {
     setHistory([]);
     setExpanded(new Set());
     setFocusedId(roots[0] || null);
+    setRelationFocusId(null);
     setPeoplePanelNodeId(null);
     window.setTimeout(() => fitView({ duration: 500, padding: 0.3, maxZoom: 1.1 }), 50);
   }, [roots, fitView]);
@@ -818,6 +1017,12 @@ function ChartInner(props: Props) {
     setMode(nextMode);
     setMessage(null);
     setPeoplePanelNodeId(null);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (nextMode === "edit") url.searchParams.set("modo", "editar");
+      else url.searchParams.delete("modo");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+    }
     if (nextMode === "edit") {
       const allIds = new Set(sourceNodes.map((node) => node.id));
       setExpanded(allIds);
@@ -831,6 +1036,7 @@ function ChartInner(props: Props) {
       setHistory([]);
       setExpanded(new Set());
       setFocusedId(roots[0] || null);
+      setRelationFocusId(null);
       window.setTimeout(() => fitView({ duration: 500, padding: 0.26, maxZoom: 1.1 }), 60);
     }
   };
@@ -862,9 +1068,13 @@ function ChartInner(props: Props) {
         schoolSlug: props.schoolSlug,
         title: String(formData.get("chartTitle") ?? ""),
         year: String(formData.get("chartYear") ?? new Date().getFullYear()),
-        starter: String(formData.get("starter") ?? "basic") === "single" ? "single" : "basic",
+        starter: String(formData.get("starter") ?? "basic") === "single"
+          ? "single"
+          : String(formData.get("starter") ?? "basic") === "core"
+            ? "core"
+            : "basic",
       });
-      window.location.href = `/organigramas/${props.schoolSlug}/pucara?organigrama=${result.chartId}`;
+      window.location.href = `/organigramas/${props.schoolSlug}?organigrama=${result.chartId}&modo=editar`;
     });
   };
 
@@ -878,7 +1088,7 @@ function ChartInner(props: Props) {
 
   const autoOrderEditor = () => {
     const allIds = new Set(sourceNodes.map((node) => node.id));
-    const ordered = autoLayout(sourceNodes, sourceEdges, allIds, depth);
+    const ordered = autoLayout(sourceNodes, hierarchyEdges, allIds, depth);
     setSourceNodes(ordered);
     window.setTimeout(() => fitView({ duration: 560, padding: 0.12, maxZoom: 0.78 }), 70);
     runAction(async () => {
@@ -896,20 +1106,26 @@ function ChartInner(props: Props) {
 
   const importHito = () => {
     if (props.schoolSlug !== "pucara") return;
-    if (!window.confirm("Se va a crear/actualizar un organigrama de prueba separado con toda la estructura y personas del Pucará original. El organigrama actual no se borra. ¿Continuar?")) return;
+    if (!window.confirm("Se va a crear/actualizar un organigrama separado con toda la estructura y personas del Pucará original. El organigrama actual no se borra. ¿Continuar?")) return;
     runAction(async () => {
       const result = await importPucaraHitoAction({ schoolSlug: props.schoolSlug });
-      window.location.href = `/organigramas/${props.schoolSlug}/pucara?organigrama=${result.chartId}`;
+      window.location.href = `/organigramas/${props.schoolSlug}?organigrama=${result.chartId}&modo=editar`;
     });
   };
 
   const saveNode = (formData: FormData) => {
     if (!currentNode) return;
+    const requestedParentIdBeforeSave = String(formData.get("parentNodeId") ?? "");
+    if (!currentIsRoot && !requestedParentIdBeforeSave) {
+      setMessage({ type: "error", text: "Toda caja debe depender de una caja superior. Elegí ‘Depende de’ antes de guardar." });
+      return;
+    }
     runAction(async () => {
       const updated = await updatePucaraNodeAction({
         schoolSlug: props.schoolSlug,
         nodeId: currentNode.id,
         title: String(formData.get("title") ?? ""),
+        area: String(formData.get("area") ?? currentNode.area),
         formalRole: String(formData.get("formalRole") ?? ""),
         realFunction: String(formData.get("realFunction") ?? ""),
         description: String(formData.get("description") ?? ""),
@@ -923,7 +1139,7 @@ function ChartInner(props: Props) {
       setSourceNodes((current) => current.map((node) => (node.id === updated.id ? { ...node, ...updated } : node)));
       mergeDirectoryPerson(updated.person);
 
-      const requestedParentId = String(formData.get("parentNodeId") ?? "");
+      const requestedParentId = requestedParentIdBeforeSave;
       if (requestedParentId !== currentParentId) {
         const reparented = await reparentPucaraNodeAction({
           schoolSlug: props.schoolSlug,
@@ -932,7 +1148,7 @@ function ChartInner(props: Props) {
           parentNodeId: requestedParentId || null,
         });
         setSourceEdges((current) => {
-          const rest = current.filter((edge) => edge.targetId !== currentNode.id);
+          const rest = current.filter((edge) => !(edge.type === "JERARQUICA" && edge.targetId === currentNode.id));
           return reparented.edge
             ? [...rest, {
                 id: reparented.edge.id,
@@ -949,13 +1165,29 @@ function ChartInner(props: Props) {
     });
   };
 
-  const addChild = () => {
-    if (!currentNode) return;
+  const openCreateNode = (parentId?: string | null) => {
+    setCreateNodeParentId(parentId || currentNode?.id || roots[0] || null);
+    setShowCreateNode(true);
+  };
+
+  const createNodeFromModal = (formData: FormData) => {
+    const parentNodeId = String(formData.get("newNodeParentId") ?? createNodeParentId ?? "");
+    if (!parentNodeId) {
+      setMessage({ type: "error", text: "Elegí de qué caja depende la nueva función." });
+      return;
+    }
     runAction(async () => {
+      const presetKey = String(formData.get("presetKey") ?? "custom");
       const created = await createPucaraChildAction({
         schoolSlug: props.schoolSlug,
         orgChartId: props.orgChartId,
-        parentNodeId: currentNode.id,
+        parentNodeId,
+        presetKey: presetKey === "custom" ? null : presetKey,
+        title: String(formData.get("newNodeTitle") ?? ""),
+        area: String(formData.get("newNodeArea") ?? ""),
+        formalRole: String(formData.get("newNodeFormalRole") ?? ""),
+        realFunction: String(formData.get("newNodeRealFunction") ?? ""),
+        description: String(formData.get("newNodeDescription") ?? ""),
       });
       setSourceNodes((current) => [...current, created.node]);
       setSourceEdges((current) => [...current, {
@@ -965,16 +1197,94 @@ function ChartInner(props: Props) {
         type: created.edge.type,
         label: created.edge.label,
       }]);
+      setShowCreateNode(false);
       setSelectedId(created.node.id);
       setFocusedId(created.node.id);
+      setRelationFocusId(null);
+      setEditorSection("function");
       window.setTimeout(() => {
-        setCenter(
-          created.node.positionX + NODE_WIDTH / 2,
-          created.node.positionY + cardHeightFor(created.node) / 2,
-          { zoom: 0.95, duration: 420 },
-        );
+        setCenter(created.node.positionX + NODE_WIDTH / 2, created.node.positionY + cardHeightFor(created.node) / 2, { zoom: 0.95, duration: 420 });
       }, 60);
-      setMessage({ type: "ok", text: "Se agregó una nueva dependencia. Ahora completá sus datos." });
+      setMessage({ type: "ok", text: "Nueva caja creada y conectada. Ahora podés completar persona, foto y equipo." });
+    });
+  };
+
+  const completeMissingDependencies = () => {
+    runAction(async () => {
+      const result = await normalizePucaraHierarchyAction({
+        schoolSlug: props.schoolSlug,
+        orgChartId: props.orgChartId,
+      });
+
+      const rebuiltHierarchy = (result.hierarchyEdges ?? []).map((edge: SourceEdge) => ({
+        id: edge.id,
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        type: edge.type,
+        label: edge.label,
+      }));
+      const transversal = sourceEdges.filter((edge) => edge.type !== "JERARQUICA");
+      const nextEdges = [...rebuiltHierarchy, ...transversal];
+      const nextHierarchyInfo = buildDepthMap(sourceNodes, rebuiltHierarchy);
+      const nextDepth = nextHierarchyInfo.depth;
+      const nextRootId = nextHierarchyInfo.roots[0] ?? sourceNodes[0]?.id ?? null;
+      const allIds = new Set(sourceNodes.map((node) => node.id));
+      const ordered = autoLayout(sourceNodes, rebuiltHierarchy, allIds, nextDepth);
+
+      await savePucaraPositionsAction({
+        schoolSlug: props.schoolSlug,
+        positions: ordered.map((node) => ({
+          nodeId: node.id,
+          positionX: node.positionX,
+          positionY: node.positionY,
+        })),
+      });
+
+      setSourceEdges(nextEdges);
+      setSourceNodes(ordered);
+      setExpanded(allIds);
+      setRelationFocusId(null);
+      setSelectedId(nextRootId);
+      setFocusedId(nextRootId);
+      window.setTimeout(() => fitView({ duration: 650, padding: 0.1, maxZoom: 0.8 }), 80);
+      setMessage({
+        type: "ok",
+        text: result.rebuilt
+          ? "Buen Ayre quedó pasado a una jerarquía simple. Integra y Colabora se conservaron como vínculos adicionales."
+          : result.created > 0
+            ? `Se completaron ${result.created} dependencias y el organigrama quedó ordenado.`
+            : "La jerarquía ya estaba completa; igual se volvió a ordenar el organigrama.",
+      });
+    });
+  };
+
+  const addRelation = (formData: FormData) => {
+    if (!currentNode) return;
+    const targetNodeId = String(formData.get("relationTargetId") ?? "");
+    const type = String(formData.get("relationType") ?? "COLABORACION") === "DECISION" ? "DECISION" : "COLABORACION";
+    if (!targetNodeId) return;
+    runAction(async () => {
+      const edge = await createPucaraRelationAction({
+        schoolSlug: props.schoolSlug,
+        orgChartId: props.orgChartId,
+        sourceNodeId: currentNode.id,
+        targetNodeId,
+        type,
+      });
+      setSourceEdges((current) => current.some((item) => item.id === edge.id)
+        ? current
+        : [...current, { id: edge.id, sourceId: edge.sourceId, targetId: edge.targetId, type: edge.type, label: edge.label }]);
+      setFocusedId(currentNode.id);
+      setRelationFocusId(currentNode.id);
+      setMessage({ type: "ok", text: type === "DECISION" ? "Vínculo Integra guardado." : "Vínculo Colabora guardado." });
+    });
+  };
+
+  const removeRelation = (edgeId: string) => {
+    runAction(async () => {
+      await deletePucaraRelationAction({ schoolSlug: props.schoolSlug, edgeId });
+      setSourceEdges((current) => current.filter((edge) => edge.id !== edgeId));
+      setMessage({ type: "ok", text: "Vínculo eliminado." });
     });
   };
 
@@ -1028,6 +1338,7 @@ function ChartInner(props: Props) {
   };
 
   const editingMember = currentNode?.members.find((member) => member.id === editingMemberId) ?? null;
+  const currentChartMeta = props.availableCharts?.find((chart) => chart.id === props.orgChartId) ?? null;
 
   return (
     <main className="min-h-screen bg-[#eef2f7] p-2 md:p-5">
@@ -1035,20 +1346,39 @@ function ChartInner(props: Props) {
         <header className="border-b border-slate-200 bg-white px-4 py-4 md:px-6">
           <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-center">
             <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                <img src={props.schoolLogoUrl || "/images/escudo-pucara.png"} alt={props.schoolName} className="h-full w-full object-contain p-1" />
-              </div>
+              <SchoolLogo schoolSlug={props.schoolSlug} schoolName={props.schoolName} schoolLogoUrl={props.schoolLogoUrl} className="h-14 w-14" />
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Organigrama institucional</p>
                 <h1 className="text-2xl font-black text-slate-950">{props.schoolName}</h1>
-                <p className="text-sm font-semibold text-slate-500">{props.orgChartTitle}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-semibold text-slate-500">{props.orgChartTitle}</p>
+                  {currentChartMeta ? (
+                    <>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">{currentChartMeta.year}</span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-slate-600">v{currentChartMeta.version ?? 1}</span>
+                      <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-blue-700">{currentChartMeta.status || "DRAFT"}</span>
+                    </>
+                  ) : null}
+                </div>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              <Link href={`/organigramas/${props.schoolSlug}?organigrama=${props.orgChartId}`} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50">
-                <ArrowLeft className="h-4 w-4" /> Volver a organigramas
+              <Link href="/organigramas" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50">
+                <ArrowLeft className="h-4 w-4" /> Organigramas
               </Link>
+              {props.availableCharts && props.availableCharts.length > 1 ? (
+                <select
+                  value={props.orgChartId}
+                  onChange={(event) => { window.location.href = `/organigramas/${props.schoolSlug}?organigrama=${event.target.value}`; }}
+                  className="max-w-[300px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-black text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
+                  aria-label="Cambiar organigrama"
+                >
+                  {props.availableCharts.map((chart) => (
+                    <option key={chart.id} value={chart.id}>{chart.title} · {chart.year}</option>
+                  ))}
+                </select>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setShowCreateChart(true)}
@@ -1075,20 +1405,48 @@ function ChartInner(props: Props) {
         ) : null}
 
         {mode === "edit" ? (
-          <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 md:px-6">
-            <button type="button" onClick={autoOrderEditor} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700">
-              <LayoutGrid className="h-4 w-4" /> Auto ordenar
-            </button>
-            <button type="button" onClick={savePositions} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-60">
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar diseño
-            </button>
-            {props.schoolSlug === "pucara" ? (
-              <button type="button" onClick={importHito} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl bg-[#1C3A62] px-4 py-2.5 text-sm font-black text-white transition hover:bg-[#152f50] disabled:opacity-60">
-                <UsersRound className="h-4 w-4" /> Cargar Pucará completo
+          <>
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 md:px-6">
+              <button type="button" onClick={() => openCreateNode(selectedId || roots[0] || null)} disabled={!props.orgChartId || sourceNodes.length === 0} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-40">
+                <Plus className="h-4 w-4" /> Nueva caja
               </button>
+              <button type="button" onClick={autoOrderEditor} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:border-blue-300 hover:text-blue-700">
+                <LayoutGrid className="h-4 w-4" /> Auto ordenar
+              </button>
+              <button type="button" onClick={savePositions} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-60">
+                {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar diseño
+              </button>
+              {isBuenAyre ? (
+                <button type="button" onClick={completeMissingDependencies} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm font-black text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-60">
+                  <LayoutGrid className="h-4 w-4" /> Pasar Buen Ayre al formato simple
+                </button>
+              ) : missingDependencyCount > 0 ? (
+                <button type="button" onClick={completeMissingDependencies} disabled={isPending} className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-black text-amber-800 transition hover:bg-amber-100 disabled:opacity-60">
+                  <Link2 className="h-4 w-4" /> Completar dependencias ({missingDependencyCount})
+                </button>
+              ) : null}
+              {props.schoolSlug === "pucara" ? (
+                <details className="relative">
+                  <summary className="cursor-pointer list-none rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-600 transition hover:bg-slate-50">Herramientas Pucará</summary>
+                  <div className="absolute left-0 top-full z-50 mt-2 w-[280px] rounded-2xl border border-slate-200 bg-white p-3 shadow-2xl">
+                    <button type="button" onClick={importHito} disabled={isPending} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#1C3A62] px-4 py-2.5 text-sm font-black text-white transition hover:bg-[#152f50] disabled:opacity-60">
+                      <UsersRound className="h-4 w-4" /> Importar estructura completa
+                    </button>
+                  </div>
+                </details>
+              ) : null}
+              <p className="text-xs font-semibold text-slate-500">Nueva caja permite elegir áreas y funciones prearmadas. Al mover una tarjeta, su posición queda guardada.</p>
+            </div>
+            {isBuenAyre ? (
+              <div className="border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-800 md:px-6">
+                Buen Ayre conserva todas sus cajas, personas, fotos e Integra/Colabora. “Pasar al formato simple” reemplaza solo la dependencia jerárquica por una estructura limpia y después la ordena automáticamente.
+              </div>
+            ) : missingDependencyCount > 0 ? (
+              <div className="border-b border-amber-100 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800 md:px-6">
+                Hay {missingDependencyCount} {missingDependencyCount === 1 ? "caja" : "cajas"} sin superior jerárquico. “Completar dependencias” las integra a la estructura sin borrar sus vínculos Integra o Colabora.
+              </div>
             ) : null}
-            <p className="text-xs font-semibold text-slate-500">Arrastrá una caja: al soltarla su posición queda guardada. “Auto ordenar” también guarda el nuevo diseño.</p>
-          </div>
+          </>
         ) : null}
 
         <div className={`grid ${mode === "edit" ? "xl:grid-cols-[minmax(0,1fr)_430px]" : "grid-cols-1"}`}>
@@ -1101,7 +1459,7 @@ function ChartInner(props: Props) {
                   </div>
                   <h2 className="mt-4 text-xl font-black text-slate-950">Empezá con una base simple</h2>
                   <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">
-                    Creá Consejo + Dirección o una sola Dirección General. Después armás el resto tocando “Dependencia”.
+                    Creá una base simple o una base por niveles. Después armás el resto con “Nueva caja” o desde una caja seleccionada.
                   </p>
                   <button type="button" onClick={() => setShowCreateChart(true)} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800">
                     <Plus className="h-4 w-4" /> Crear organigrama
@@ -1116,8 +1474,9 @@ function ChartInner(props: Props) {
               onNodesChange={onNodesChange}
               onNodeDragStop={(_, node) => persistDraggedNode(node.id, node.position.x, node.position.y)}
               onNodeClick={(_, node) => {
+                // Tocar una caja solo la enfoca y muestra sus vínculos directos.
+                // La ficha se abre únicamente desde el botón de información.
                 focusNode(node.id);
-                if (mode === "view") setPeoplePanelNodeId(node.id);
               }}
               nodesDraggable={mode === "edit"}
               panOnDrag
@@ -1135,11 +1494,7 @@ function ChartInner(props: Props) {
               <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#cbd5e1" />
               <Controls position="top-left" showInteractive={false} />
               <div className="pointer-events-none absolute right-5 top-5 z-20 flex min-h-[92px] min-w-[92px] items-center justify-center rounded-[24px] border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur">
-                <img
-                  src={props.schoolLogoUrl || "/images/escudo-pucara.png"}
-                  alt={`Escudo de ${props.schoolName}`}
-                  className="h-[68px] w-[68px] object-contain"
-                />
+                <SchoolLogo schoolSlug={props.schoolSlug} schoolName={props.schoolName} schoolLogoUrl={props.schoolLogoUrl} className="h-[68px] w-[68px] !border-0 !shadow-none" />
               </div>
             </ReactFlow>
 
@@ -1179,6 +1534,13 @@ function ChartInner(props: Props) {
                     </ArrowPadButton>
                   </div>
                 </div>
+
+                {focusedRelations.length ? (
+                  <div className="absolute bottom-6 right-6 z-20 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white/95 px-3 py-2 text-[11px] font-black shadow-xl backdrop-blur">
+                    <span className="inline-flex items-center gap-1.5 text-red-700"><span className="h-2.5 w-2.5 rounded-full bg-red-500" /> Integra</span>
+                    <span className="inline-flex items-center gap-1.5 text-blue-700"><span className="h-2.5 w-2.5 rounded-full bg-blue-500" /> Colabora</span>
+                  </div>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -1194,14 +1556,15 @@ function ChartInner(props: Props) {
                         <h2 className="mt-1 text-xl font-black text-slate-950">{currentNode.title}</h2>
                         <p className="mt-1 text-sm font-semibold text-slate-500">Editá la función, la foto y todas las personas desde acá.</p>
                       </div>
-                      <button type="button" onClick={addChild} disabled={isPending} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-800 disabled:opacity-60">
-                        <Plus className="h-4 w-4" /> Dependencia
+                      <button type="button" onClick={() => openCreateNode(currentNode.id)} disabled={isPending} className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-blue-700 px-3 py-2 text-xs font-black text-white transition hover:bg-blue-800 disabled:opacity-60">
+                        <Plus className="h-4 w-4" /> Agregar debajo
                       </button>
                     </div>
 
-                    <div className="mt-4 grid grid-cols-2 rounded-xl bg-slate-100 p-1">
-                      <button type="button" onClick={() => setEditorSection("function")} className={`rounded-lg px-3 py-2 text-sm font-black transition ${editorSection === "function" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Función</button>
-                      <button type="button" onClick={() => setEditorSection("team")} className={`rounded-lg px-3 py-2 text-sm font-black transition ${editorSection === "team" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Equipo ({currentNode.members.length})</button>
+                    <div className="mt-4 grid grid-cols-3 rounded-xl bg-slate-100 p-1">
+                      <button type="button" onClick={() => setEditorSection("function")} className={`rounded-lg px-2 py-2 text-sm font-black transition ${editorSection === "function" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Función</button>
+                      <button type="button" onClick={() => setEditorSection("team")} className={`rounded-lg px-2 py-2 text-sm font-black transition ${editorSection === "team" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Equipo ({currentNode.members.length})</button>
+                      <button type="button" onClick={() => setEditorSection("relations")} className={`rounded-lg px-2 py-2 text-sm font-black transition ${editorSection === "relations" ? "bg-white text-blue-700 shadow-sm" : "text-slate-500"}`}>Vínculos ({currentRelations.length})</button>
                     </div>
                   </div>
 
@@ -1220,19 +1583,40 @@ function ChartInner(props: Props) {
                         <select
                           name="parentNodeId"
                           defaultValue={currentParentId}
+                          required={!currentIsRoot}
                           className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100"
                         >
-                          <option value="">Sin superior · caja raíz</option>
+                          {currentIsRoot ? (
+                            <option value="">Sin superior · caja raíz</option>
+                          ) : (
+                            <option value="" disabled>Elegir caja superior</option>
+                          )}
                           {parentCandidates.map((candidate) => (
                             <option key={candidate.id} value={candidate.id}>
                               {candidate.title}
                             </option>
                           ))}
                         </select>
-                        <span className="mt-1.5 block text-xs font-semibold text-slate-400">Cambiar este campo mueve la dependencia jerárquica y su línea.</span>
+                        <span className="mt-1.5 block text-xs font-semibold text-slate-400">Toda caja, salvo la raíz, debe tener un superior. Cambiar este campo mueve la dependencia jerárquica y su línea.</span>
                       </label>
 
                       <Field label="Título de la caja" name="title" defaultValue={currentNode.title} />
+                      <label className="block">
+                        <span className="mb-1.5 block text-xs font-black uppercase tracking-[0.11em] text-slate-500">Área</span>
+                        <select name="area" defaultValue={currentNode.area} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                          <option value="DIRECCION">Dirección</option>
+                          <option value="ACADEMICA">Académica</option>
+                          <option value="FORMACION">Formación</option>
+                          <option value="FAMILIA">Familias</option>
+                          <option value="COMUNICACION">Comunicación</option>
+                          <option value="POSTULACIONES">Postulaciones</option>
+                          <option value="ADMINISTRACION">Administración</option>
+                          <option value="OPERACIONES">Operaciones</option>
+                          <option value="TUTORIA">Tutorías</option>
+                          <option value="CAPELLANIA">Capellanía</option>
+                          <option value="OTRO">Otro</option>
+                        </select>
+                      </label>
                       <Field label="Cargo formal" name="formalRole" defaultValue={currentNode.formalRole || ""} />
                       <Field label="Función real" name="realFunction" defaultValue={currentNode.realFunction || ""} />
                       <TextArea label="Descripción" name="description" defaultValue={currentNode.description || ""} />
@@ -1255,12 +1639,12 @@ function ChartInner(props: Props) {
                         {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar función y responsable
                       </button>
 
-                      <button type="button" onClick={deleteNode} disabled={isPending || sourceEdges.some((edge) => edge.sourceId === currentNode.id)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45">
+                      <button type="button" onClick={deleteNode} disabled={isPending || hierarchyEdges.some((edge) => edge.sourceId === currentNode.id)} className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-45">
                         <Trash2 className="h-4 w-4" /> Eliminar esta caja
                       </button>
-                      {sourceEdges.some((edge) => edge.sourceId === currentNode.id) ? <p className="text-center text-xs font-semibold text-slate-400">No se puede eliminar mientras tenga dependencias inferiores.</p> : null}
+                      {hierarchyEdges.some((edge) => edge.sourceId === currentNode.id) ? <p className="text-center text-xs font-semibold text-slate-400">No se puede eliminar mientras tenga dependencias inferiores.</p> : null}
                     </form>
-                  ) : (
+                  ) : editorSection === "team" ? (
                     <div className="space-y-4 p-5">
                       <button type="button" onClick={() => setEditingMemberId("new")} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-400 px-4 py-3 text-sm font-black text-[#123868] transition hover:bg-amber-300">
                         <UserPlus className="h-4 w-4" /> Agregar persona al equipo
@@ -1313,6 +1697,66 @@ function ChartInner(props: Props) {
                         </form>
                       ) : null}
                     </div>
+                  ) : (
+                    <div className="space-y-5 p-5">
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-start gap-3">
+                          <Link2 className="mt-0.5 h-5 w-5 text-blue-700" />
+                          <div>
+                            <p className="text-sm font-black text-slate-950">Integra y Colabora</p>
+                            <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">
+                              La jerarquía queda siempre limpia. Al tocar una caja, solo sus vínculos directos se resaltan: Integra en rojo suave y Colabora en azul. No se dibuja una telaraña permanente.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <form action={addRelation} className="space-y-3 rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700">Agregar vínculo</p>
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-black uppercase tracking-[0.11em] text-slate-500">Tipo</span>
+                          <select name="relationType" defaultValue="COLABORACION" className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                            <option value="COLABORACION">Colabora · azul</option>
+                            <option value="DECISION">Integra · rojo</option>
+                          </select>
+                        </label>
+                        <label className="block">
+                          <span className="mb-1.5 block text-xs font-black uppercase tracking-[0.11em] text-slate-500">Con qué caja</span>
+                          <select name="relationTargetId" defaultValue="" required className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                            <option value="" disabled>Elegir función</option>
+                            {sourceNodes.filter((node) => node.id !== currentNode.id).map((node) => (
+                              <option key={node.id} value={node.id}>{node.title}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <button type="submit" disabled={isPending} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 py-3 text-sm font-black text-white transition hover:bg-blue-800 disabled:opacity-60">
+                          <Plus className="h-4 w-4" /> Guardar vínculo
+                        </button>
+                      </form>
+
+                      <div className="space-y-2">
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Vínculos de esta caja</p>
+                        {currentRelations.length ? currentRelations.map((edge) => {
+                          const otherId = edge.sourceId === currentNode.id ? edge.targetId : edge.sourceId;
+                          const other = sourceNodes.find((node) => node.id === otherId);
+                          const integration = edge.type === "DECISION";
+                          return (
+                            <div key={edge.id} className={`flex items-center gap-3 rounded-2xl border p-3 ${integration ? "border-red-100 bg-red-50/70" : "border-blue-100 bg-blue-50/70"}`}>
+                              <div className={`h-3 w-3 shrink-0 rounded-full ${integration ? "bg-red-500" : "bg-blue-500"}`} />
+                              <div className="min-w-0 flex-1">
+                                <p className={`text-xs font-black uppercase tracking-[0.12em] ${integration ? "text-red-700" : "text-blue-700"}`}>{integration ? "Integra" : "Colabora"}</p>
+                                <p className="truncate text-sm font-black text-slate-900">{other?.title || "Caja relacionada"}</p>
+                              </div>
+                              <button type="button" onClick={() => removeRelation(edge.id)} className="flex h-9 w-9 items-center justify-center rounded-xl text-rose-600 transition hover:bg-white" aria-label="Eliminar vínculo">
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          );
+                        }) : (
+                          <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-500">Todavía no tiene vínculos Integra o Colabora.</div>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </>
               ) : (
@@ -1341,6 +1785,16 @@ function ChartInner(props: Props) {
           onSubmit={createNewChart}
         />
       ) : null}
+
+      {showCreateNode ? (
+        <CreateNodeModal
+          nodes={sourceNodes}
+          defaultParentId={createNodeParentId || selectedId || roots[0] || ""}
+          pending={isPending}
+          onClose={() => setShowCreateNode(false)}
+          onSubmit={createNodeFromModal}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1348,61 +1802,47 @@ function ChartInner(props: Props) {
 function PeopleDrawer({ node, onClose }: { node: SourceNode; onClose: () => void }) {
   const people = peopleForNode(node);
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35 backdrop-blur-sm" onMouseDown={onClose}>
-      <aside className="h-full w-full max-w-[520px] overflow-y-auto bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Ficha de la función</p>
-              <h2 className="mt-1 text-2xl font-black text-slate-950">{node.title}</h2>
-              <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">{nodeDescription(node)}</p>
-              <p className="mt-2 text-xs font-black text-slate-400">
-                {people.length} {people.length === 1 ? "persona" : "personas"}
-              </p>
-            </div>
-            <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600"><X className="h-5 w-5" /></button>
+    <aside className="fixed bottom-5 right-5 top-24 z-[70] w-[min(430px,calc(100vw-2rem))] overflow-y-auto rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+      <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 p-5 backdrop-blur">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Ficha de la función</p>
+            <h2 className="mt-1 text-xl font-black text-slate-950">{node.title}</h2>
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">{nodeDescription(node)}</p>
+            <p className="mt-2 text-xs font-black text-slate-400">
+              {people.length} {people.length === 1 ? "persona" : "personas"}
+            </p>
           </div>
+          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200"><X className="h-5 w-5" /></button>
         </div>
+      </div>
 
-        <div className="space-y-3 p-5">
-          {people.length ? people.map((person) => (
-            <div key={person.id} className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm">
-              <div className="flex items-start gap-4">
-                <SimplePhoto src={person.photoUrl} name={person.name} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-base font-black text-slate-950">{person.name}</p>
-                  <p className="mt-1 text-sm font-semibold leading-relaxed text-slate-500">{person.role}</p>
-                  {person.weeklyHours ? (
-                    <p className="mt-2 text-xs font-black text-slate-400">{person.weeklyHours} hs. semanales</p>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="mt-4 border-t border-slate-100 pt-3">
-                {person.email ? (
-                  <a
-                    href={`mailto:${person.email}`}
-                    className="inline-flex items-center gap-2 text-sm font-black text-blue-700 transition hover:text-blue-900"
-                  >
-                    <Mail className="h-4 w-4" />
-                    {person.email}
-                  </a>
-                ) : (
-                  <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-400">
-                    <Mail className="h-4 w-4" />
-                    Correo todavía no cargado
-                  </p>
-                )}
+      <div className="space-y-3 p-4">
+        {people.length ? people.map((person) => (
+          <div key={person.id} className="rounded-[20px] border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-4">
+              <SimplePhoto src={person.photoUrl} name={person.name} />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black text-slate-950">{person.name}</p>
+                <p className="mt-1 text-sm font-semibold leading-relaxed text-slate-500">{person.role}</p>
+                {person.weeklyHours ? <p className="mt-2 text-xs font-black text-slate-400">{person.weeklyHours} hs. semanales</p> : null}
               </div>
             </div>
-          )) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-500">
-              Esta función todavía no tiene una persona asignada.
+            <div className="mt-3 border-t border-slate-100 pt-3">
+              {person.email ? (
+                <a href={`mailto:${person.email}`} className="inline-flex items-center gap-2 text-sm font-black text-blue-700 transition hover:text-blue-900">
+                  <Mail className="h-4 w-4" />{person.email}
+                </a>
+              ) : (
+                <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-400"><Mail className="h-4 w-4" />Correo todavía no cargado</p>
+              )}
             </div>
-          )}
-        </div>
-      </aside>
-    </div>
+          </div>
+        )) : (
+          <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm font-semibold text-slate-500">Esta función todavía no tiene una persona asignada.</div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -1489,58 +1929,201 @@ function CreateChartModal({
 }) {
   const year = new Date().getFullYear();
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={onClose}>
-      <div className="w-full max-w-[620px] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+      <div className="w-full max-w-[590px] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
         <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5 md:p-6">
           <div>
             <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Nuevo organigrama</p>
-            <h2 className="mt-1 text-2xl font-black text-slate-950">Empezar simple</h2>
-            <p className="mt-2 max-w-xl text-sm font-semibold leading-relaxed text-slate-500">
-              Se crea una base chica para {schoolName}. Después agregás dependencias y personas desde el mismo editor, sin cargar todo de una.
-            </p>
+            <h2 className="mt-1 text-2xl font-black text-slate-950">¿Con qué base querés empezar?</h2>
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">No cargamos todo de una. Elegís una base y después agregás las cajas que realmente usa {schoolName}.</p>
           </div>
-          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200">
-            <X className="h-5 w-5" />
-          </button>
+          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200"><X className="h-5 w-5" /></button>
         </div>
 
-        <form action={onSubmit} className="space-y-5 p-5 md:p-6">
-          <div className="grid gap-3 md:grid-cols-[1fr_120px]">
-            <Field label="Nombre" name="chartTitle" defaultValue={`Organigrama ${schoolName} ${year}`} />
-            <Field label="Año" name="chartYear" type="number" defaultValue={String(year)} />
-          </div>
+        <form action={onSubmit} className="space-y-4 p-5 md:p-6">
+          <input type="hidden" name="chartTitle" value="" />
+          <input type="hidden" name="chartYear" value={String(year)} />
 
-          <fieldset>
-            <legend className="mb-2 text-xs font-black uppercase tracking-[0.11em] text-slate-500">Base inicial</legend>
-            <div className="grid gap-3 md:grid-cols-2">
-              <label className="cursor-pointer rounded-2xl border-2 border-blue-200 bg-blue-50/70 p-4 transition has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                <input type="radio" name="starter" value="basic" defaultChecked className="sr-only" />
-                <p className="font-black text-slate-950">Consejo + Dirección</p>
-                <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">La recomendada. Arranca con dos cajas unidas y desde Dirección agregás las áreas.</p>
-              </label>
-              <label className="cursor-pointer rounded-2xl border-2 border-slate-200 bg-white p-4 transition has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50">
-                <input type="radio" name="starter" value="single" className="sr-only" />
-                <p className="font-black text-slate-950">Solo Dirección</p>
-                <p className="mt-1 text-xs font-semibold leading-relaxed text-slate-500">Una sola caja raíz para construir toda la estructura desde cero.</p>
-              </label>
-            </div>
-          </fieldset>
+          <label className="block cursor-pointer rounded-2xl border-2 border-blue-200 bg-blue-50/70 p-4 transition has-[:checked]:border-blue-600 has-[:checked]:ring-4 has-[:checked]:ring-blue-100">
+            <input type="radio" name="starter" value="basic" defaultChecked className="sr-only" />
+            <p className="font-black text-slate-950">Base simple · recomendada</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Consejo de Dirección → Dirección General. Desde ahí agregás Nivel Primario, Administración o lo que necesites.</p>
+          </label>
 
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
-            <p className="text-sm font-black text-emerald-800">Después es todo desde Editar</p>
-            <p className="mt-1 text-xs font-semibold leading-relaxed text-emerald-700">
-              Tocás una caja → “Dependencia” para crear otra. Podés elegir personas ya cargadas o crear nuevas, agregar foto, correo, descripción y mover cada tarjeta con el mouse.
-            </p>
-          </div>
+          <label className="block cursor-pointer rounded-2xl border-2 border-slate-200 bg-white p-4 transition has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50 has-[:checked]:ring-4 has-[:checked]:ring-blue-100">
+            <input type="radio" name="starter" value="core" className="sr-only" />
+            <p className="font-black text-slate-950">Base por áreas</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Consejo + Dirección + Inicial + Primaria + Secundaria + Formación + Familias + Administración.</p>
+          </label>
 
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <label className="block cursor-pointer rounded-2xl border-2 border-slate-200 bg-white p-4 transition has-[:checked]:border-blue-600 has-[:checked]:bg-blue-50 has-[:checked]:ring-4 has-[:checked]:ring-blue-100">
+            <input type="radio" name="starter" value="single" className="sr-only" />
+            <p className="font-black text-slate-950">Desde cero</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">Solo Dirección General. Útil si el colegio tiene una estructura muy distinta.</p>
+          </label>
+
+          <div className="flex flex-col-reverse gap-2 pt-2 sm:flex-row sm:justify-end">
             <button type="button" onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-600 transition hover:bg-slate-50">Cancelar</button>
             <button type="submit" disabled={pending} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800 disabled:opacity-60">
-              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              Crear y empezar a editar
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Crear y editar
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function CreateNodeModal({
+  nodes,
+  defaultParentId,
+  pending,
+  onClose,
+  onSubmit,
+}: {
+  nodes: SourceNode[];
+  defaultParentId: string;
+  pending: boolean;
+  onClose: () => void;
+  onSubmit: (formData: FormData) => void;
+}) {
+  const categories = [
+    {
+      key: "niveles",
+      label: "Niveles",
+      presets: ["nivel-inicial", "nivel-primario", "nivel-secundario", "equipo-directivo-inicial", "equipo-directivo-primario", "equipo-directivo-secundario", "equipo-docente", "secretaria-nivel", "preceptoria"],
+    },
+    {
+      key: "formacion",
+      label: "Académica y Formación",
+      presets: ["coordinacion-academica", "consejo-academico", "formacion-integral", "tutorias", "doe", "coordinacion-ingles", "capellania"],
+    },
+    {
+      key: "familias",
+      label: "Familias y Comunicación",
+      presets: ["familias", "comunicacion", "postulaciones", "comite-admisiones"],
+    },
+    {
+      key: "gestion",
+      label: "Administración y Soporte",
+      presets: ["administracion", "facturacion-cobranzas", "contabilidad-tesoreria", "rrhh", "operaciones", "mantenimiento-servicios", "limpieza-conserjeria", "recepcion", "tic"],
+    },
+  ] as const;
+
+  const [step, setStep] = useState<1 | 2>(1);
+  const [parentId, setParentId] = useState(defaultParentId);
+  const [categoryKey, setCategoryKey] = useState<(typeof categories)[number]["key"]>("niveles");
+  const [presetKey, setPresetKey] = useState<string>("");
+  const [customTitle, setCustomTitle] = useState("");
+  const [customArea, setCustomArea] = useState("OTRO");
+  const isCustom = presetKey === "custom";
+  const selectedPreset = ORG_SIMPLE_PRESETS.find((preset) => preset.key === presetKey) ?? null;
+  const category = categories.find((item) => item.key === categoryKey) ?? categories[0];
+  const categoryPresets = category.presets
+    .map((key) => ORG_SIMPLE_PRESETS.find((preset) => preset.key === key))
+    .filter(Boolean) as typeof ORG_SIMPLE_PRESETS;
+  const parentNode = nodes.find((node) => node.id === parentId) ?? null;
+  const canCreate = Boolean(parentId && (selectedPreset || (isCustom && customTitle.trim())));
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm" onMouseDown={onClose}>
+      <div className="w-full max-w-[720px] overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5 md:p-6">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-blue-700">Nueva caja · paso {step} de 2</p>
+            <h2 className="mt-1 text-2xl font-black text-slate-950">{step === 1 ? "¿De quién depende?" : "¿Qué querés agregar?"}</h2>
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-500">
+              {step === 1
+                ? "Primero elegí la caja superior. Esa será la línea normal del organigrama."
+                : "Elegí una base. Después de crearla se abre el editor para agregar persona, foto, correo y ajustar el texto."}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition hover:bg-slate-200"><X className="h-5 w-5" /></button>
+        </div>
+
+        {step === 1 ? (
+          <div className="space-y-5 p-5 md:p-6">
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700">Caja superior</p>
+              <select value={parentId} onChange={(event) => setParentId(event.target.value)} className="mt-2 w-full rounded-xl border border-blue-200 bg-white px-3.5 py-3 text-base font-black text-slate-900 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+                <option value="" disabled>Elegir de quién depende</option>
+                {nodes.map((node) => <option key={node.id} value={node.id}>{node.title}</option>)}
+              </select>
+              {parentNode ? <p className="mt-2 text-sm font-semibold text-blue-800">La nueva caja va a aparecer debajo de <strong>{parentNode.title}</strong>.</p> : null}
+            </div>
+            <div className="flex justify-end">
+              <button type="button" disabled={!parentId} onClick={() => setStep(2)} className="inline-flex items-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800 disabled:opacity-40">
+                Siguiente <ArrowRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        ) : (
+          <form action={onSubmit} className="p-5 md:p-6">
+            <input type="hidden" name="newNodeParentId" value={parentId} />
+            <input type="hidden" name="presetKey" value={presetKey || "custom"} />
+            <input type="hidden" name="newNodeTitle" value={isCustom ? customTitle : ""} />
+            <input type="hidden" name="newNodeArea" value={isCustom ? customArea : "OTRO"} />
+            <input type="hidden" name="newNodeFormalRole" value="" />
+            <input type="hidden" name="newNodeRealFunction" value="" />
+            <input type="hidden" name="newNodeDescription" value="" />
+
+            <div className="flex flex-wrap gap-2">
+              {categories.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => { setCategoryKey(item.key); setPresetKey(""); }}
+                  className={`rounded-full px-3.5 py-2 text-xs font-black transition ${categoryKey === item.key && !isCustom ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}
+                >
+                  {item.label}
+                </button>
+              ))}
+              <button type="button" onClick={() => setPresetKey("custom")} className={`rounded-full px-3.5 py-2 text-xs font-black transition ${isCustom ? "bg-blue-700 text-white" : "bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>Otra caja</button>
+            </div>
+
+            {!isCustom ? (
+              <div className="mt-4 grid max-h-[390px] gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                {categoryPresets.map((preset) => (
+                  <button
+                    key={preset.key}
+                    type="button"
+                    onClick={() => setPresetKey(preset.key)}
+                    className={`rounded-2xl border p-4 text-left transition ${presetKey === preset.key ? "border-blue-500 bg-blue-50 ring-4 ring-blue-100" : "border-slate-200 bg-white hover:border-blue-200 hover:bg-slate-50"}`}
+                  >
+                    <p className="text-sm font-black text-slate-950">{preset.title}</p>
+                    <p className="mt-1 line-clamp-2 text-xs font-semibold leading-relaxed text-slate-500">{preset.description}</p>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-black uppercase tracking-[0.11em] text-slate-500">Nombre de la caja</span>
+                  <input value={customTitle} onChange={(event) => setCustomTitle(event.target.value)} placeholder="Ej. Coordinación de Primaria" className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100" />
+                </label>
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-black uppercase tracking-[0.11em] text-slate-500">Área</span>
+                  <select value={customArea} onChange={(event) => setCustomArea(event.target.value)} className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-100">
+                    <option value="DIRECCION">Dirección</option><option value="ACADEMICA">Académica</option><option value="FORMACION">Formación</option><option value="FAMILIA">Familias</option><option value="COMUNICACION">Comunicación</option><option value="POSTULACIONES">Postulaciones</option><option value="ADMINISTRACION">Administración</option><option value="OPERACIONES">Operaciones</option><option value="TUTORIA">Tutorías</option><option value="CAPELLANIA">Capellanía</option><option value="OTRO">Otro</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {selectedPreset ? (
+              <div className="mt-4 rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+                Se va a crear <strong>{selectedPreset.title}</strong> debajo de <strong>{parentNode?.title}</strong>. Después podés cambiar todo.
+              </div>
+            ) : null}
+
+            <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+              <button type="button" onClick={() => setStep(1)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm font-black text-slate-600 transition hover:bg-slate-50"><ArrowLeft className="h-4 w-4" /> Atrás</button>
+              <button type="submit" disabled={pending || !canCreate} className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800 disabled:opacity-40">
+                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Crear caja
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

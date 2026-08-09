@@ -1,23 +1,16 @@
-import Link from "next/link";
-import type { ReactNode } from "react";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  Edit3,
-  GitBranch,
-  History,
-  Home,
-  Trash2,
-} from "lucide-react";
 import { notFound } from "next/navigation";
-import { OrgChartCanvas } from "../../../components/organigramas/OrgChartCanvas";
+import { PucaraOrgChart } from "../../../components/organigramas/PucaraOrgChart";
 import { prisma } from "../../../lib/prisma";
 import { parseEdgeLabelStorage } from "../../../lib/org-edge-route";
-import { deleteOrgChartFormAction } from "./editar/actions";
+
+export const dynamic = "force-dynamic";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
-  searchParams: Promise<{ organigrama?: string | string[] }>;
+  searchParams: Promise<{
+    organigrama?: string | string[];
+    modo?: string | string[];
+  }>;
 };
 
 export async function generateMetadata({ params }: PageProps) {
@@ -28,23 +21,25 @@ export async function generateMetadata({ params }: PageProps) {
 
   return {
     title: `Organigrama ${school.name} | APDES`,
-    description: `Organigrama institucional del colegio ${school.name}.`,
+    description: `Organigrama institucional navegable y editable del colegio ${school.name}.`,
   };
 }
 
-export default async function SchoolOrganigramaPage({
-  params,
-  searchParams,
-}: PageProps) {
+export default async function SchoolOrganigramaPage({ params, searchParams }: PageProps) {
   const { schoolSlug } = await params;
-  const requestedChartParam = (await searchParams).organigrama;
-  const requestedChartId = Array.isArray(requestedChartParam)
-    ? requestedChartParam[0]
-    : requestedChartParam;
+  const search = await searchParams;
+  const requestedParam = search.organigrama;
+  const requestedId = Array.isArray(requestedParam) ? requestedParam[0] : requestedParam;
+  const modeParam = Array.isArray(search.modo) ? search.modo[0] : search.modo;
+  const initialMode = modeParam === "editar" ? "edit" : "view";
 
   const school = await (prisma as any).school.findUnique({
     where: { slug: schoolSlug },
     include: {
+      people: {
+        where: { active: true },
+        orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      },
       orgCharts: {
         orderBy: [
           { year: "desc" },
@@ -62,8 +57,10 @@ export default async function SchoolOrganigramaPage({
               },
             },
           },
+          // IMPORTANTE: cargamos TODAS las relaciones. La jerarquía se ve
+          // siempre y los vínculos Integra/Colabora solo aparecen al tocar
+          // una caja, evitando una telaraña permanente.
           edges: true,
-          reviewNotes: true,
         },
       },
     },
@@ -72,10 +69,11 @@ export default async function SchoolOrganigramaPage({
   if (!school) notFound();
 
   const currentChart =
-    school.orgCharts.find((chart: any) => chart.id === requestedChartId) ??
-    school.orgCharts[0];
+    school.orgCharts.find((chart: any) => chart.id === requestedId) ??
+    school.orgCharts[0] ??
+    null;
 
-  const visualNodes = currentChart?.nodes.map((node: any) => ({
+  const nodes = (currentChart?.nodes ?? []).map((node: any) => ({
     id: node.id,
     title: node.title,
     area: node.area,
@@ -86,12 +84,11 @@ export default async function SchoolOrganigramaPage({
     positionX: node.positionX,
     positionY: node.positionY,
     color: node.color,
-    icon: node.icon ?? null,
     person: node.person,
     members: node.members ?? [],
-  })) ?? [];
+  }));
 
-  const visualEdges = currentChart?.edges.map((edge: any) => {
+  const edges = (currentChart?.edges ?? []).map((edge: any) => {
     const stored = parseEdgeLabelStorage(edge.label);
     return {
       id: edge.id,
@@ -99,162 +96,37 @@ export default async function SchoolOrganigramaPage({
       targetId: edge.targetId,
       type: edge.type,
       label: stored.label,
-      routeOrientation: stored.route?.orientation ?? null,
-      routeOffset: stored.route?.offset ?? null,
     };
-  }) ?? [];
+  });
 
-  const totalPeople = new Set(
-    visualNodes.flatMap((node: any) => [
-      node.person?.id,
-      ...(node.members ?? []).map((member: any) => member.person?.id),
-    ]).filter(Boolean),
-  ).size;
-  const totalHours = visualNodes.reduce((acc: number, node: any) => {
-    const memberHours = (node.members ?? []).reduce((sum: number, member: any) => sum + (member.weeklyHours ?? 0), 0);
-    return acc + (memberHours || node.weeklyHours || 0);
-  }, 0);
+  const people = (school.people ?? []).map((person: any) => ({
+    id: person.id,
+    firstName: person.firstName,
+    lastName: person.lastName,
+    email: person.email,
+    photoUrl: person.photoUrl,
+  }));
+
+  const availableCharts = (school.orgCharts ?? []).map((chart: any) => ({
+    id: chart.id,
+    title: chart.title,
+    year: chart.year,
+    version: chart.version ?? 1,
+    status: chart.status,
+  }));
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-8">
-      <section className="mx-auto max-w-[1800px]">
-        <div className="flex flex-wrap gap-3">
-          <Link href="/organigramas" className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
-            <ArrowLeft className="h-4 w-4" />
-            Volver a organigramas
-          </Link>
-          <Link href="/" className="inline-flex items-center gap-2 text-sm font-black text-slate-600 hover:text-slate-900">
-            <Home className="h-4 w-4" />
-            Menú principal
-          </Link>
-        </div>
-
-        <div className="mt-6">
-          <div className="mb-6 flex flex-col justify-between gap-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:flex-row md:items-end">
-            <div>
-              <p className="inline-flex items-center gap-2 text-sm font-black uppercase tracking-[0.2em] text-blue-700">
-                <GitBranch className="h-4 w-4" />
-                Organigrama institucional
-              </p>
-              <h1 className="mt-2 text-3xl font-black text-slate-950">{school.name}</h1>
-              <p className="mt-2 text-slate-600">{school.city} · {school.province}</p>
-            </div>
-
-            {currentChart ? (
-              <div className="flex flex-wrap gap-3">
-                <Badge>Año {currentChart.year}</Badge>
-                <Badge>Versión {currentChart.version ?? 1}</Badge>
-                <Badge>{currentChart.status}</Badge>
-                <Badge>{totalPeople} personas</Badge>
-                <Badge>{totalHours} hs.</Badge>
-                <Link href={`/organigramas/${school.slug}/editar?organigrama=${currentChart.id}`} className="inline-flex items-center gap-2 rounded-full bg-blue-700 px-4 py-2 text-sm font-black text-white shadow-sm transition hover:bg-blue-800">
-                  <Edit3 className="h-4 w-4" /> Editar
-                </Link>
-
-                <details className="group relative">
-                  <summary className="inline-flex cursor-pointer list-none items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-black text-rose-700 transition hover:bg-rose-100">
-                    <Trash2 className="h-4 w-4" /> Eliminar
-                  </summary>
-                  <div className="absolute right-0 z-30 mt-2 w-[320px] rounded-3xl border border-rose-100 bg-white p-4 text-left shadow-2xl">
-                    <p className="text-sm font-black text-slate-950">Eliminar este organigrama</p>
-                    <p className="mt-2 text-xs font-semibold leading-relaxed text-slate-500">
-                      Se elimina el organigrama actual con sus cajas, relaciones y observaciones. No elimina el colegio ni las personas guardadas.
-                    </p>
-                    <form action={deleteOrgChartFormAction} className="mt-4">
-                      <input type="hidden" name="orgChartId" value={currentChart.id} />
-                      <input type="hidden" name="schoolSlug" value={school.slug} />
-                      <button type="submit" className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-black text-white transition hover:bg-rose-700">
-                        <Trash2 className="h-4 w-4" /> Confirmar eliminación
-                      </button>
-                    </form>
-                  </div>
-                </details>
-              </div>
-            ) : null}
-          </div>
-
-          {school.orgCharts.length > 1 ? (
-            <div className="mb-6 rounded-3xl border border-blue-100 bg-blue-50/70 p-5">
-              <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-blue-700 shadow-sm">
-                  <History className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="font-black text-slate-950">
-                    Organigramas disponibles
-                  </h2>
-                  <p className="mt-1 text-sm font-semibold leading-relaxed text-slate-600">
-                    Elegí exactamente cuál querés ver o editar. El cambio de
-                    versión no modifica los demás.
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                {school.orgCharts.map((chart: any) => {
-                  const isSelected = chart.id === currentChart?.id;
-
-                  return (
-                    <Link
-                      key={chart.id}
-                      href={`/organigramas/${school.slug}?organigrama=${chart.id}`}
-                      className={`rounded-2xl border p-4 transition ${
-                        isSelected
-                          ? "border-blue-300 bg-white shadow-sm"
-                          : "border-transparent bg-white/60 hover:border-blue-200 hover:bg-white"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black leading-snug text-slate-950">
-                            {chart.title}
-                          </p>
-                          <p className="mt-2 text-xs font-bold text-slate-500">
-                            Año {chart.year} · Versión {chart.version ?? 1} ·{" "}
-                            {chart.status}
-                          </p>
-                        </div>
-                        {isSelected ? (
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-black text-blue-700">
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Abierto
-                          </span>
-                        ) : (
-                          <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-black text-slate-600">
-                            Abrir
-                          </span>
-                        )}
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ) : null}
-
-          {currentChart && visualNodes.length > 0 ? (
-            <OrgChartCanvas
-              nodes={visualNodes}
-              edges={visualEdges}
-              schoolSlug={school.slug}
-              orgChartId={currentChart.id}
-              orgChartTitle={currentChart?.title}
-            />
-          ) : (
-            <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
-              <h2 className="text-xl font-black text-slate-950">Este colegio todavía no tiene nodos cargados</h2>
-              <p className="mx-auto mt-3 max-w-2xl text-slate-600">Entrá al editor para cargar cargos, personas, horas y relaciones.</p>
-              <Link href={`/organigramas/${school.slug}/editar?organigrama=${currentChart?.id ?? ""}`} className="mt-5 inline-flex items-center gap-2 rounded-2xl bg-blue-700 px-5 py-3 text-sm font-black text-white transition hover:bg-blue-800">
-                <Edit3 className="h-4 w-4" /> Abrir editor
-              </Link>
-            </div>
-          )}
-        </div>
-      </section>
-    </main>
+    <PucaraOrgChart
+      schoolSlug={school.slug}
+      schoolName={school.name}
+      schoolLogoUrl={school.logoUrl}
+      orgChartId={currentChart?.id ?? ""}
+      orgChartTitle={currentChart?.title ?? "Todavía no hay un organigrama creado"}
+      initialNodes={nodes}
+      initialEdges={edges}
+      existingPeople={people}
+      initialMode={initialMode}
+      availableCharts={availableCharts}
+    />
   );
-}
-
-function Badge({ children }: { children: ReactNode }) {
-  return <span className="rounded-full bg-blue-50 px-4 py-2 text-sm font-black text-blue-700">{children}</span>;
 }
