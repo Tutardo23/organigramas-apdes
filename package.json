@@ -9,14 +9,15 @@
     "lint": "eslint src prisma scripts prisma.config.ts --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test src/lib/__tests__/*.test.ts",
-    "check": "npm run guard:hito && npm run guard:active-stack && npm run typecheck && npm run lint:new && npm run lint:core && npm run lint:editor-data && npm run lint && npm run test && npm run build",
+    "check": "npm run guard:hito && npm run guard:active-stack && npm run guard:release && npm run typecheck && npm run lint:new && npm run lint:core && npm run lint:editor-data && npm run lint && npm run test && npm run build",
     "audit:high": "npm audit --audit-level=high",
     "db:seed": "tsx prisma/seed.ts",
     "lint:new": "eslint \"src/components/organigramas/PucaraOrgChart.tsx\" \"src/app/organigramas/[schoolSlug]/pucara/actions.ts\" \"src/lib/buen-ayre-simple-hierarchy.ts\" --max-warnings=0",
     "lint:core": "eslint \"prisma/seed.ts\" \"src/app/organigramas/actions.ts\" \"src/app/organigramas/[schoolSlug]/page.tsx\" \"src/app/talento/page.tsx\" \"src/app/talento/[schoolSlug]/page.tsx\" \"src/app/talento/[schoolSlug]/actions.ts\" --max-warnings=0",
     "lint:editor-data": "eslint \"src/app/organigramas/[schoolSlug]/editar/actions.ts\" \"src/app/organigramas/[schoolSlug]/explorar/page.tsx\" --max-warnings=0",
     "guard:hito": "node scripts/check-hito-route.mjs",
-    "guard:active-stack": "node scripts/check-active-orgchart-stack.mjs"
+    "guard:active-stack": "node scripts/check-active-orgchart-stack.mjs",
+    "guard:release": "node scripts/check-release-clean.mjs"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.14",
