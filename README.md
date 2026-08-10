@@ -1,36 +1,79 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Organigramas APDES
 
-## Getting Started
+Plataforma web para crear, visualizar y editar organigramas institucionales de colegios APDES.
 
-First, run the development server:
+## Experiencia principal
 
-```bash
+El sistema utiliza **HITO / PucaraOrgChart** como experiencia unica del organigrama:
+
+- modo **Ver** con navegacion progresiva;
+- modo **Editar** sobre la misma estructura;
+- dependencias jerarquicas;
+- relaciones **Integra / Colabora / Todas**;
+- personas y equipos por funcion;
+- posiciones persistentes;
+- soporte para Pucara, El Buen Ayre y nuevos colegios;
+- editor guiado para usuarios no tecnicos.
+
+El stack institucional anterior fue retirado del codigo activo.
+
+## Stack
+
+- Next.js 16 con App Router
+- TypeScript
+- React 19
+- Tailwind CSS
+- Prisma + Neon PostgreSQL
+- Clerk
+- XYFlow / React Flow
+
+## Desarrollo
+
+```powershell
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Aplicacion local:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Controles antes de publicar
 
-## Learn More
+```powershell
+npm run check
+```
 
-To learn more about Next.js, take a look at the following resources:
+El control completo incluye:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- proteccion de la ruta HITO;
+- validacion del stack activo;
+- limpieza del release;
+- TypeScript;
+- ESLint con 0 warnings;
+- tests;
+- build de produccion.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Tambien pueden ejecutarse individualmente:
 
-## Deploy on Vercel
+```powershell
+npm run guard:hito
+npm run guard:active-stack
+npm run guard:release
+npm run typecheck
+npm run lint
+npm run test
+npm run build
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Flujo Git
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+La rama estable es `main`.
+
+Los cambios grandes se desarrollan en ramas `feature/*`, se validan con `npm run check` y luego se integran mediante Pull Request.
+
+## Proxima etapa
+
+El siguiente modulo sera un **asistente guiado de creacion de organigramas** para acelerar la carga de decenas de colegios sin exigir conocimientos tecnicos.

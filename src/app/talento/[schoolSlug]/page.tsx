@@ -7,21 +7,14 @@ import {
   type TalentPerson,
 } from "../../../components/talento/TalentDashboard";
 
-export async function generateMetadata({
-  params,
-}: {
-  params: Promise<{ schoolSlug: string }>;
-}) {
+export async function generateMetadata({ params }: { params: Promise<{ schoolSlug: string }> }) {
   const { schoolSlug } = await params;
-
   const school = await prisma.school.findUnique({
     where: { slug: schoolSlug },
     select: { name: true },
   });
 
-  if (!school) {
-    return { title: "Talento no encontrado" };
-  }
+  if (!school) return { title: "Talento no encontrado" };
 
   return {
     title: `Talento ${school.name} | APDES`,
@@ -36,14 +29,15 @@ type JsonItem = {
   date?: string;
 };
 
-function normalizeJsonItems(value: unknown) {
+function normalizeJsonItems(value: unknown): TalentPerson["competencies"] {
   if (!Array.isArray(value)) return [];
 
-  return value
-    .map((item) => {
-      if (!item || typeof item !== "object") return null;
-      const record = item as JsonItem;
-      return {
+  return value.flatMap((item): TalentPerson["competencies"] => {
+    if (!item || typeof item !== "object") return [];
+
+    const record = item as JsonItem;
+    return [
+      {
         title: String(record.title ?? "Sin título"),
         detail: record.detail ? String(record.detail) : undefined,
         score:
@@ -51,14 +45,9 @@ function normalizeJsonItems(value: unknown) {
             ? record.score
             : undefined,
         date: record.date ? String(record.date) : undefined,
-      };
-    })
-    .filter(Boolean) as Array<{
-    title: string;
-    detail?: string;
-    score?: number;
-    date?: string;
-  }>;
+      },
+    ];
+  });
 }
 
 function areaLabel(area: string) {
@@ -75,18 +64,13 @@ function areaLabel(area: string) {
     CAPELLANIA: "Capellanía",
     OTRO: "Otro",
   };
-
   return labels[area] ?? area;
 }
 
-export default async function SchoolTalentPage({
-  params,
-}: {
-  params: Promise<{ schoolSlug: string }>;
-}) {
+export default async function SchoolTalentPage({ params }: { params: Promise<{ schoolSlug: string }> }) {
   const { schoolSlug } = await params;
 
-  const school = await (prisma as any).school.findUnique({
+  const school = await prisma.school.findUnique({
     where: { slug: schoolSlug },
     include: {
       people: {
@@ -116,10 +100,10 @@ export default async function SchoolTalentPage({
   const currentChart = school.orgCharts[0] ?? null;
   const nodes = currentChart?.nodes ?? [];
 
-  const people: TalentPerson[] = school.people.map((person: any) => {
-    const nodeParticipations = [] as TalentPerson["nodes"];
+  const people: TalentPerson[] = school.people.map((person) => {
+    const nodeParticipations: TalentPerson["nodes"] = [];
 
-    nodes.forEach((node: any) => {
+    nodes.forEach((node) => {
       if (node.personId === person.id) {
         nodeParticipations.push({
           nodeId: node.id,
@@ -131,7 +115,7 @@ export default async function SchoolTalentPage({
         });
       }
 
-      node.members?.forEach((member: any) => {
+      node.members.forEach((member) => {
         if (member.personId === person.id) {
           nodeParticipations.push({
             nodeId: node.id,
@@ -168,7 +152,7 @@ export default async function SchoolTalentPage({
     { area: string; people: Set<string>; hours: number; nodes: Set<string> }
   >();
 
-  nodes.forEach((node: any) => {
+  nodes.forEach((node) => {
     const existing = coverageMap.get(node.area) ?? {
       area: node.area,
       people: new Set<string>(),
@@ -177,11 +161,10 @@ export default async function SchoolTalentPage({
     };
 
     existing.nodes.add(node.id);
-
     if (node.personId) existing.people.add(node.personId);
     if (node.weeklyHours) existing.hours += node.weeklyHours;
 
-    node.members?.forEach((member: any) => {
+    node.members.forEach((member) => {
       existing.people.add(member.personId);
       existing.hours += member.weeklyHours ?? 0;
     });
@@ -205,31 +188,18 @@ export default async function SchoolTalentPage({
         <div className="mb-5 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
-              <Link
-                href="/talento"
-                className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Volver al dashboard de talento
+              <Link href="/talento" className="inline-flex items-center gap-2 text-sm font-black text-blue-700 hover:text-blue-900">
+                <ArrowLeft className="h-4 w-4" /> Volver al dashboard de talento
               </Link>
-              <p className="mt-4 text-xs font-black uppercase tracking-[0.22em] text-blue-700">
-                Talento institucional
-              </p>
-              <h1 className="mt-1 text-3xl font-black text-slate-950">
-                {school.name}
-              </h1>
+              <p className="mt-4 text-xs font-black uppercase tracking-[0.22em] text-blue-700">Talento institucional</p>
+              <h1 className="mt-1 text-3xl font-black text-slate-950">{school.name}</h1>
               <p className="mt-1 max-w-3xl text-sm font-semibold leading-relaxed text-slate-500">
-                Perfil dinámico de personas, horas, áreas cubiertas, funciones
-                reales, potencial, competencias, capacitaciones y evaluaciones.
+                Perfil dinámico de personas, horas, áreas cubiertas, funciones reales, potencial, competencias, capacitaciones y evaluaciones.
               </p>
             </div>
 
-            <Link
-              href={`/organigramas/${school.slug}`}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
-            >
-              <Network className="h-4 w-4" />
-              Ver organigrama
+            <Link href={`/organigramas/${school.slug}`} className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50">
+              <Network className="h-4 w-4" /> Ver organigrama
             </Link>
           </div>
         </div>

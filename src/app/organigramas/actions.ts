@@ -5,6 +5,28 @@ import { redirect } from "next/navigation";
 import { prisma } from "../../lib/prisma";
 import { institutionalTemplateNodes } from "../../lib/org-chart-template";
 
+const NODE_AREAS = [
+  "DIRECCION",
+  "ACADEMICA",
+  "FORMACION",
+  "FAMILIA",
+  "COMUNICACION",
+  "POSTULACIONES",
+  "OPERACIONES",
+  "ADMINISTRACION",
+  "TUTORIA",
+  "CAPELLANIA",
+  "OTRO",
+] as const;
+
+type NodeAreaValue = (typeof NODE_AREAS)[number];
+
+function safeArea(value: string): NodeAreaValue {
+  return NODE_AREAS.includes(value as NodeAreaValue)
+    ? (value as NodeAreaValue)
+    : "OTRO";
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
@@ -29,9 +51,7 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
   const slug = slugify(name);
 
   const school = await prisma.school.upsert({
-    where: {
-      slug,
-    },
+    where: { slug },
     update: {
       city: city || undefined,
       province: province || undefined,
@@ -52,7 +72,7 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
   });
 
   if (!existingChart) {
-    await (prisma as any).orgChart.create({
+    await prisma.orgChart.create({
       data: {
         schoolId: school.id,
         title: `Organigrama Institucional ${school.name} ${year}`,
@@ -64,7 +84,7 @@ export async function createSchoolAndOrgChartAction(formData: FormData) {
             : {
                 create: institutionalTemplateNodes.map((node, index) => ({
                   title: node.title,
-                  area: node.area,
+                  area: safeArea(node.area),
                   formalRole: node.formalRole,
                   realFunction: node.realFunction,
                   description: node.description,
@@ -91,11 +111,7 @@ export async function deleteSchoolAction(formData: FormData) {
     throw new Error("No se pudo identificar el colegio para eliminar.");
   }
 
-  await (prisma as any).school.delete({
-    where: {
-      id: schoolId,
-    },
-  });
+  await prisma.school.delete({ where: { id: schoolId } });
 
   revalidatePath("/");
   revalidatePath("/organigramas");

@@ -6,6 +6,35 @@ import { PrismaNeon } from "@prisma/adapter-neon";
 const adapter = new PrismaNeon({ connectionString: process.env.DATABASE_URL! });
 const prisma = new PrismaClient({ adapter });
 
+type NodeAreaValue =
+  | "DIRECCION"
+  | "ACADEMICA"
+  | "FORMACION"
+  | "FAMILIA"
+  | "COMUNICACION"
+  | "POSTULACIONES"
+  | "OPERACIONES";
+
+type EdgeTypeValue =
+  | "JERARQUICA"
+  | "TRANSVERSAL"
+  | "COLABORACION"
+  | "INFORMACION";
+
+type SeedNode = {
+  id: string;
+  title: string;
+  area: NodeAreaValue;
+  personId: string;
+  x: number;
+  y: number;
+  color: string;
+  icon: string;
+  hours: number;
+};
+
+type SeedEdge = readonly [string, string, string, EdgeTypeValue, string | null];
+
 const people = [
   { id: "demo-person-directora", firstName: "María", lastName: "González", formalRole: "Directora", realFunction: "Conducir el proyecto institucional y articular las decisiones del equipo directivo.", weeklyHours: 40, potentialLevel: "ALTO", competencies: [{ title: "Liderazgo de equipos", detail: "Muy sólido", score: 4 }], trainings: [{ title: "Dirección de instituciones educativas", detail: "APDES · 2025" }], evaluations: [{ title: "Evaluación anual", detail: "Desempeño destacado", score: 4 }], talentNotes: "Fortaleza para generar acuerdos. Próximo paso: desarrollar sucesores para funciones operativas." },
   { id: "demo-person-academica", firstName: "Lucía", lastName: "Fernández", formalRole: "Coordinadora académica", realFunction: "Acompañar la planificación, la observación de clases y el desarrollo docente.", weeklyHours: 36, potentialLevel: "ALTO", competencies: [{ title: "Acompañamiento pedagógico", detail: "Avanzado", score: 4 }], trainings: [{ title: "Feedback docente", detail: "APDES · 2026" }], evaluations: [{ title: "Evaluación de desempeño", detail: "Muy buen desempeño", score: 4 }], talentNotes: "Perfil con capacidad para asumir proyectos transversales." },
@@ -16,7 +45,7 @@ const people = [
   { id: "demo-person-operaciones", firstName: "Pablo", lastName: "Sánchez", formalRole: "Administrador", realFunction: "Asegurar recursos, procesos administrativos y soporte operativo para los equipos.", weeklyHours: 40, potentialLevel: "CRITICO", competencies: [{ title: "Gestión operativa", detail: "Muy sólido", score: 4 }], trainings: [{ title: "Seguridad e infraestructura", detail: "2026" }], evaluations: [{ title: "Evaluación anual", detail: "Buen desempeño", score: 3 }], talentNotes: "Perfil crítico por concentración de conocimiento operativo. Requiere plan de respaldo." },
 ];
 
-const nodes = [
+const nodes: SeedNode[] = [
   { id: "demo-node-direccion", title: "Dirección", area: "DIRECCION", personId: "demo-person-directora", x: 760, y: 40, color: "#1d4ed8", icon: "landmark", hours: 40 },
   { id: "demo-node-academica", title: "Coordinación Académica", area: "ACADEMICA", personId: "demo-person-academica", x: 220, y: 330, color: "#0f766e", icon: "graduation-cap", hours: 36 },
   { id: "demo-node-formacion", title: "Formación Integral", area: "FORMACION", personId: "demo-person-formacion", x: 650, y: 330, color: "#7c3aed", icon: "book-open", hours: 32 },
@@ -26,7 +55,7 @@ const nodes = [
   { id: "demo-node-operaciones", title: "Operaciones y Administración", area: "OPERACIONES", personId: "demo-person-operaciones", x: 860, y: 650, color: "#475569", icon: "building", hours: 40 },
 ];
 
-const edges = [
+const edges: SeedEdge[] = [
   ["demo-edge-dir-aca", "demo-node-direccion", "demo-node-academica", "JERARQUICA", null],
   ["demo-edge-dir-for", "demo-node-direccion", "demo-node-formacion", "JERARQUICA", null],
   ["demo-edge-dir-fam", "demo-node-direccion", "demo-node-familia", "JERARQUICA", null],
@@ -34,7 +63,7 @@ const edges = [
   ["demo-edge-for-fam", "demo-node-formacion", "demo-node-familia", "TRANSVERSAL", "Acompañamiento de familias"],
   ["demo-edge-fam-com", "demo-node-familia", "demo-node-comunicacion", "COLABORACION", "Eventos y comunicación"],
   ["demo-edge-pos-com", "demo-node-postulaciones", "demo-node-comunicacion", "INFORMACION", "Nuevas familias"],
-] as const;
+];
 
 async function main() {
   const school = await prisma.school.upsert({
@@ -58,19 +87,21 @@ async function main() {
   }
 
   for (const [index, node] of nodes.entries()) {
-    const person = people.find((item) => item.id === node.personId)!;
+    const person = people.find((item) => item.id === node.personId);
+    if (!person) throw new Error(`No se encontró la persona ${node.personId} del seed.`);
+
     await prisma.orgNode.upsert({
       where: { id: node.id },
-      update: { title: node.title, area: node.area as any, personId: node.personId, formalRole: person.formalRole, realFunction: person.realFunction, weeklyHours: node.hours, positionX: node.x, positionY: node.y, color: node.color, icon: node.icon, order: index + 1 },
-      create: { id: node.id, orgChartId: chart.id, title: node.title, area: node.area as any, personId: node.personId, formalRole: person.formalRole, realFunction: person.realFunction, weeklyHours: node.hours, positionX: node.x, positionY: node.y, color: node.color, icon: node.icon, order: index + 1 },
+      update: { title: node.title, area: node.area, personId: node.personId, formalRole: person.formalRole, realFunction: person.realFunction, weeklyHours: node.hours, positionX: node.x, positionY: node.y, color: node.color, icon: node.icon, order: index + 1 },
+      create: { id: node.id, orgChartId: chart.id, title: node.title, area: node.area, personId: node.personId, formalRole: person.formalRole, realFunction: person.realFunction, weeklyHours: node.hours, positionX: node.x, positionY: node.y, color: node.color, icon: node.icon, order: index + 1 },
     });
   }
 
   for (const [id, sourceId, targetId, type, label] of edges) {
     await prisma.orgEdge.upsert({
       where: { id },
-      update: { sourceId, targetId, type: type as any, label },
-      create: { id, orgChartId: chart.id, sourceId, targetId, type: type as any, label },
+      update: { sourceId, targetId, type, label },
+      create: { id, orgChartId: chart.id, sourceId, targetId, type, label },
     });
   }
 
@@ -83,4 +114,9 @@ async function main() {
   console.log("Demostración APDES cargada correctamente");
 }
 
-main().catch((error) => { console.error(error); process.exit(1); }).finally(async () => prisma.$disconnect());
+main()
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  })
+  .finally(async () => prisma.$disconnect());

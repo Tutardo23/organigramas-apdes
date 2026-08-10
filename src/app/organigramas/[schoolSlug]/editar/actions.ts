@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../../../../lib/prisma";
 import {
   packEdgeLabelStorage,
@@ -25,7 +26,7 @@ function numberOrNull(value: unknown) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizeEdgeForClient(edge: any) {
+function normalizeEdgeForClient<T extends { label: string | null }>(edge: T) {
   const stored = parseEdgeLabelStorage(edge.label);
   return {
     ...edge,
@@ -124,7 +125,14 @@ function revalidateOrganigrama(schoolSlug: string) {
   revalidatePath(`/organigramas/${schoolSlug}/editar`);
 }
 
-function normalizeNode(node: any) {
+type NodeWithPeople = Prisma.OrgNodeGetPayload<{
+  include: {
+    person: true;
+    members: { include: { person: true } };
+  };
+}>;
+
+function normalizeNode(node: NodeWithPeople) {
   return {
     ...node,
     icon: node.icon ?? null,
@@ -133,7 +141,7 @@ function normalizeNode(node: any) {
 }
 
 async function resolvePersonForSchool(
-  client: any,
+  client: Prisma.TransactionClient,
   input: {
     schoolId: string;
     personId?: string | null;
@@ -250,7 +258,7 @@ async function resolvePersonForSchool(
 }
 
 async function getNextNodeOrder(orgChartId: string) {
-  const count = await (prisma as any).orgNode.count({ where: { orgChartId } });
+  const count = await prisma.orgNode.count({ where: { orgChartId } });
   return count + 1;
 }
 
@@ -262,7 +270,7 @@ export async function deleteOrgChartAction(input: {
     throw new Error("No se encontró el organigrama para eliminar.");
   }
 
-  await (prisma as any).orgChart.delete({
+  await prisma.orgChart.delete({
     where: { id: input.orgChartId },
   });
 
@@ -298,7 +306,7 @@ export async function createNodeAction(input: {
   const icon = textOrNull(input.icon) || defaultIconsByArea[area];
   const nextOrder = await getNextNodeOrder(input.orgChartId);
 
-  const node = await (prisma as any).orgNode.create({
+  const node = await prisma.orgNode.create({
     data: {
       orgChartId: input.orgChartId,
       title: input.title?.trim() || "Nuevo cargo o área",
@@ -328,7 +336,7 @@ export async function applyInstitutionalTemplateAction(input: {
   orgChartId: string;
   schoolSlug: string;
 }) {
-  const chart = await (prisma as any).orgChart.findUnique({
+  const chart = await prisma.orgChart.findUnique({
     where: { id: input.orgChartId },
     include: {
       nodes: {
@@ -346,7 +354,7 @@ export async function applyInstitutionalTemplateAction(input: {
   if (!chart) throw new Error("No se encontró el organigrama.");
 
   const existingTitles = new Set(
-    chart.nodes.map((node: any) => normalizeTemplateTitle(node.title)),
+    chart.nodes.map((node) => normalizeTemplateTitle(node.title)),
   );
   const missing = institutionalTemplateNodes.filter(
     (template) => !existingTitles.has(normalizeTemplateTitle(template.title)),
@@ -359,7 +367,7 @@ export async function applyInstitutionalTemplateAction(input: {
   const firstOrder = chart.nodes.length + 1;
   const createdNodes = await prisma.$transaction(
     missing.map((template, index) =>
-      (prisma as any).orgNode.create({
+      prisma.orgNode.create({
         data: {
           orgChartId: input.orgChartId,
           title: template.title,
@@ -395,15 +403,15 @@ export async function updateNodesVisualDefaultsAction(input: {
   orgChartId: string;
   schoolSlug: string;
 }) {
-  const nodes = await (prisma as any).orgNode.findMany({
+  const nodes = await prisma.orgNode.findMany({
     where: { orgChartId: input.orgChartId },
     select: { id: true, area: true },
   });
 
   await Promise.all(
-    nodes.map((node: any) => {
+    nodes.map((node) => {
       const area = safeArea(String(node.area ?? "OTRO"));
-      return (prisma as any).orgNode.update({
+      return prisma.orgNode.update({
         where: { id: node.id },
         data: {
           color: defaultColorsByArea[area] || defaultColorsByArea.OTRO,
@@ -415,7 +423,7 @@ export async function updateNodesVisualDefaultsAction(input: {
 
   revalidateOrganigrama(input.schoolSlug);
 
-  return nodes.map((node: any) => {
+  return nodes.map((node) => {
     const area = safeArea(String(node.area ?? "OTRO"));
     return {
       id: node.id,
@@ -442,7 +450,7 @@ export async function updateNodeAction(input: {
   personEmail?: string | null;
   personPhone?: string | null;
 }) {
-  const currentNode = await (prisma as any).orgNode.findUnique({
+  const currentNode = await prisma.orgNode.findUnique({
     where: { id: input.nodeId },
     include: { orgChart: true, person: true },
   });
@@ -479,7 +487,7 @@ export async function updateNodeAction(input: {
           })
         : null;
 
-    const updatedNode = await (tx as any).orgNode.update({
+    const updatedNode = await tx.orgNode.update({
       where: { id: input.nodeId },
       data: {
         title: input.title.trim() || "Sin título",
@@ -519,7 +527,7 @@ export async function moveNodeAction(input: {
   positionX: number;
   positionY: number;
 }) {
-  const node = await (prisma as any).orgNode.update({
+  const node = await prisma.orgNode.update({
     where: { id: input.nodeId },
     data: {
       positionX: input.positionX,
@@ -541,7 +549,7 @@ export async function updateNodesPositionsAction(input: {
 }) {
   await prisma.$transaction(
     input.positions.map((position) =>
-      (prisma as any).orgNode.update({
+      prisma.orgNode.update({
         where: { id: position.nodeId },
         data: {
           positionX: position.positionX,
@@ -559,7 +567,7 @@ export async function deleteNodeAction(input: {
   nodeId: string;
   schoolSlug: string;
 }) {
-  await (prisma as any).orgNode.delete({ where: { id: input.nodeId } });
+  await prisma.orgNode.delete({ where: { id: input.nodeId } });
   revalidateOrganigrama(input.schoolSlug);
   return { ok: true, nodeId: input.nodeId };
 }
@@ -572,7 +580,7 @@ export async function createEdgeAction(input: {
   type: string;
   label?: string | null;
 }) {
-  const existingEdge = await (prisma as any).orgEdge.findFirst({
+  const existingEdge = await prisma.orgEdge.findFirst({
     where: {
       orgChartId: input.orgChartId,
       sourceId: input.sourceId,
@@ -585,14 +593,14 @@ export async function createEdgeAction(input: {
     : { label: null, route: null };
 
   const edge = existingEdge
-    ? await (prisma as any).orgEdge.update({
+    ? await prisma.orgEdge.update({
         where: { id: existingEdge.id },
         data: {
           type: safeEdgeType(input.type),
           label: packEdgeLabelStorage(textOrNull(input.label), existingStored.route),
         },
       })
-    : await (prisma as any).orgEdge.create({
+    : await prisma.orgEdge.create({
         data: {
           orgChartId: input.orgChartId,
           sourceId: input.sourceId,
@@ -612,7 +620,7 @@ export async function updateEdgeAction(input: {
   type: string;
   label?: string | null;
 }) {
-  const currentEdge = await (prisma as any).orgEdge.findUnique({
+  const currentEdge = await prisma.orgEdge.findUnique({
     where: { id: input.edgeId },
   });
 
@@ -621,7 +629,7 @@ export async function updateEdgeAction(input: {
   }
 
   const stored = parseEdgeLabelStorage(currentEdge.label);
-  const edge = await (prisma as any).orgEdge.update({
+  const edge = await prisma.orgEdge.update({
     where: { id: input.edgeId },
     data: {
       type: safeEdgeType(input.type),
@@ -629,7 +637,9 @@ export async function updateEdgeAction(input: {
     },
   });
 
-  await (prisma as any).orgEdge.deleteMany({
+  // Una pareja de cajas debe tener una sola relación vigente. Esto limpia
+  // conexiones antiguas que podían quedar superpuestas al cambiar el tipo.
+  await prisma.orgEdge.deleteMany({
     where: {
       orgChartId: currentEdge.orgChartId,
       sourceId: currentEdge.sourceId,
@@ -647,7 +657,7 @@ export async function updateEdgeRouteAction(input: {
   schoolSlug: string;
   route: StoredEdgeRoute | null;
 }) {
-  const currentEdge = await (prisma as any).orgEdge.findUnique({
+  const currentEdge = await prisma.orgEdge.findUnique({
     where: { id: input.edgeId },
   });
 
@@ -659,7 +669,7 @@ export async function updateEdgeRouteAction(input: {
   }
 
   const stored = parseEdgeLabelStorage(currentEdge.label);
-  const edge = await (prisma as any).orgEdge.update({
+  const edge = await prisma.orgEdge.update({
     where: { id: input.edgeId },
     data: {
       label: packEdgeLabelStorage(stored.label, input.route),
@@ -674,7 +684,7 @@ export async function deleteEdgeAction(input: {
   edgeId: string;
   schoolSlug: string;
 }) {
-  await (prisma as any).orgEdge.delete({ where: { id: input.edgeId } });
+  await prisma.orgEdge.delete({ where: { id: input.edgeId } });
   revalidateOrganigrama(input.schoolSlug);
   return { ok: true, edgeId: input.edgeId };
 }
@@ -693,7 +703,7 @@ export async function createOrUpdateNodeMemberAction(input: {
   weeklyHours?: number | string | null;
   notes?: string | null;
 }) {
-  const node = await (prisma as any).orgNode.findUnique({
+  const node = await prisma.orgNode.findUnique({
     where: { id: input.orgNodeId },
     include: { orgChart: true },
   });
@@ -720,7 +730,7 @@ export async function createOrUpdateNodeMemberAction(input: {
       phone,
     });
 
-    const data: Record<string, unknown> = {
+    const memberData = {
       personId: person.id,
       role,
       roleTitle: textOrNull(input.roleTitle),
@@ -730,34 +740,32 @@ export async function createOrUpdateNodeMemberAction(input: {
 
     const existingMembership =
       !input.memberId
-        ? await (tx as any).orgNodeMember.findFirst({
+        ? await tx.orgNodeMember.findFirst({
             where: { orgNodeId: input.orgNodeId, personId: person.id },
           })
         : null;
 
     const membershipId = input.memberId || existingMembership?.id || null;
-    if (!membershipId) {
-      const count = await (tx as any).orgNodeMember.count({
-        where: { orgNodeId: input.orgNodeId },
-      });
-      data.order = count + 1;
-    }
+    const nextOrder = membershipId
+      ? null
+      : (await tx.orgNodeMember.count({ where: { orgNodeId: input.orgNodeId } })) + 1;
 
     const member = membershipId
-      ? await (tx as any).orgNodeMember.update({
+      ? await tx.orgNodeMember.update({
           where: { id: membershipId },
-          data,
+          data: memberData,
           include: { person: true },
         })
-      : await (tx as any).orgNodeMember.create({
+      : await tx.orgNodeMember.create({
           data: {
             orgNodeId: input.orgNodeId,
-            ...data,
+            ...memberData,
+            order: nextOrder ?? 0,
           },
           include: { person: true },
         });
 
-    const updatedNode = await (tx as any).orgNode.findUnique({
+    const updatedNode = await tx.orgNode.findUnique({
       where: { id: input.orgNodeId },
       include: {
         person: true,
@@ -771,6 +779,10 @@ export async function createOrUpdateNodeMemberAction(input: {
     return { member, updatedNode };
   });
 
+  if (!result.updatedNode) {
+    throw new Error("No se pudo recargar la caja después de actualizar el equipo.");
+  }
+
   revalidateOrganigrama(input.schoolSlug);
   return {
     member: result.member,
@@ -783,9 +795,9 @@ export async function deleteNodeMemberAction(input: {
   memberId: string;
   orgNodeId: string;
 }) {
-  await (prisma as any).orgNodeMember.delete({ where: { id: input.memberId } });
+  await prisma.orgNodeMember.delete({ where: { id: input.memberId } });
 
-  const updatedNode = await (prisma as any).orgNode.findUnique({
+  const updatedNode = await prisma.orgNode.findUnique({
     where: { id: input.orgNodeId },
     include: {
       person: true,
@@ -795,6 +807,10 @@ export async function deleteNodeMemberAction(input: {
       },
     },
   });
+
+  if (!updatedNode) {
+    throw new Error("No se pudo recargar la caja después de eliminar el integrante.");
+  }
 
   revalidateOrganigrama(input.schoolSlug);
   return {
@@ -813,7 +829,7 @@ export async function updateOrgChartStatusAction(input: {
   const status = safeChartStatus(input.status);
   const now = new Date();
 
-  const chart = await (prisma as any).orgChart.update({
+  const chart = await prisma.orgChart.update({
     where: { id: input.orgChartId },
     data: {
       status,
@@ -837,7 +853,7 @@ export async function createReviewNoteAction(input: {
   title: string;
   body?: string | null;
 }) {
-  const note = await (prisma as any).orgReviewNote.create({
+  const note = await prisma.orgReviewNote.create({
     data: {
       orgChartId: input.orgChartId,
       nodeId: input.nodeId || null,
@@ -855,7 +871,7 @@ export async function resolveReviewNoteAction(input: {
   schoolSlug: string;
   noteId: string;
 }) {
-  const note = await (prisma as any).orgReviewNote.update({
+  const note = await prisma.orgReviewNote.update({
     where: { id: input.noteId },
     data: { status: "RESOLVED" },
   });

@@ -2,10 +2,12 @@ import { redirect } from "next/navigation";
 
 type PageProps = {
   params: Promise<{ schoolSlug: string }>;
-  searchParams: Promise<{ organigrama?: string | string[] }>;
+  searchParams: Promise<{
+    organigrama?: string | string[];
+  }>;
 };
 
-export default async function LegacyEditOrganigramaPage({
+export default async function LegacyExploreOrganigramaPage({
   params,
   searchParams,
 }: PageProps) {
@@ -18,7 +20,7 @@ export default async function LegacyEditOrganigramaPage({
 
   const query = new URLSearchParams();
   if (requestedId) query.set("organigrama", requestedId);
-  query.set("modo", "editar");
 
-  redirect(`/organigramas/${schoolSlug}?${query.toString()}`);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  redirect(`/organigramas/${schoolSlug}${suffix}`);
 }

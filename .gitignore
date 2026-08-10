@@ -42,3 +42,25 @@ yarn-error.log*
 next-env.d.ts
 
 /app/generated/prisma
+
+# Local release/version artifacts - keep on disk, never commit
+/organigramas-apdes-v*/
+/backups/
+/patches/
+/legacy/organigramas/pre-v12/
+/v*-payload/
+/README-V*.md
+/apply-v*.ps1
+/rollback-v*.ps1
+/verify-v*.ps1
+/INSTALAR.ps1
+/*.patch
+/*backup*.bak
+/*.bak
+
+# Historical one-off migration scripts
+/scripts/apply-step-*.mjs
+/scripts/apply-steps-*.mjs
+/scripts/apply-v*.mjs
+/scripts/cleanup-orgchart-artifacts.mjs
+/scripts/cleanup-orgchart-backups.mjs

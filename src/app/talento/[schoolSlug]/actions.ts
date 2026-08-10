@@ -1,5 +1,6 @@
 "use server";
 
+import type { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { prisma } from "../../../lib/prisma";
 
@@ -8,13 +9,13 @@ function readString(formData: FormData, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function readJsonArray(formData: FormData, key: string) {
+function readJsonArray(formData: FormData, key: string): Prisma.InputJsonArray {
   const raw = readString(formData, key);
   if (!raw) return [];
 
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Prisma.InputJsonArray) : [];
   } catch {
     return [];
   }
@@ -28,7 +29,7 @@ export async function updatePersonTalentAction(formData: FormData) {
     throw new Error("Faltan datos para actualizar el perfil de talento.");
   }
 
-  await (prisma as any).person.update({
+  await prisma.person.update({
     where: { id: personId },
     data: {
       potentialLevel: readString(formData, "potentialLevel") || "SIN_DEFINIR",
@@ -40,6 +41,5 @@ export async function updatePersonTalentAction(formData: FormData) {
   });
 
   revalidatePath(`/talento/${schoolSlug}`);
-
   return { ok: true };
 }
