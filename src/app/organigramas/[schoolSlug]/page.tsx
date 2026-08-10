@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { OrgChartExperienceLayer } from "../../../components/organigramas/OrgChartExperienceLayer";
 import { PucaraOrgChart } from "../../../components/organigramas/PucaraOrgChart";
 import { prisma } from "../../../lib/prisma";
 import { parseEdgeLabelStorage } from "../../../lib/org-edge-route";
@@ -145,19 +146,25 @@ export default async function SchoolOrganigramaPage({
   }));
 
   return (
-    <PucaraOrgChart
-      schoolSlug={school.slug}
-      schoolName={school.name}
-      schoolLogoUrl={school.logoUrl}
-      orgChartId={currentChart?.id ?? ""}
-      orgChartTitle={
-        currentChart?.title ?? "Todavía no hay un organigrama creado"
-      }
-      initialNodes={nodes}
-      initialEdges={edges}
-      existingPeople={people}
-      initialMode={initialMode}
-      availableCharts={availableCharts}
-    />
+    <>
+      <PucaraOrgChart
+        schoolSlug={school.slug}
+        schoolName={school.name}
+        schoolLogoUrl={school.logoUrl}
+        orgChartId={currentChart?.id ?? ""}
+        orgChartTitle={
+          currentChart?.title ?? "Todavía no hay un organigrama creado"
+        }
+        initialNodes={nodes}
+        initialEdges={edges}
+        existingPeople={people}
+        initialMode={initialMode}
+        availableCharts={availableCharts}
+      />
+      <OrgChartExperienceLayer
+        schoolSlug={school.slug}
+        initialNodes={nodes.map((node) => ({ id: node.id, title: node.title }))}
+      />
+    </>
   );
 }

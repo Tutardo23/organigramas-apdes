@@ -1899,7 +1899,7 @@ function ChartInner(props: Props) {
               minZoom={0.12}
               maxZoom={2.2}
               fitView
-              fitViewOptions={{ padding: 0.22 }}
+              fitViewOptions={{ padding: 0.34, maxZoom: 0.82 }}
               elevateEdgesOnSelect
               defaultEdgeOptions={{ type: "smoothstep" }}
               proOptions={{ hideAttribution: true }}
